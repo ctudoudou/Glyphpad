@@ -1,7 +1,7 @@
 import Foundation
 
 public final class GlyphpadStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     private let database: SQLiteDatabase
 
@@ -12,6 +12,10 @@ public final class GlyphpadStore: @unchecked Sendable {
 
     public func appRepository() -> SQLiteAppRepository {
         SQLiteAppRepository(database: database)
+    }
+
+    public func launcherSettingsRepository() -> SQLiteLauncherSettingsRepository {
+        SQLiteLauncherSettingsRepository(database: database)
     }
 
     private func migrate() throws {
@@ -67,6 +71,16 @@ public final class GlyphpadStore: @unchecked Sendable {
                 status TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(app_id) REFERENCES apps(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS launcher_settings (
+                id TEXT PRIMARY KEY NOT NULL,
+                columns INTEGER NOT NULL,
+                rows INTEGER NOT NULL,
+                icon_size REAL NOT NULL,
+                auto_arrange INTEGER NOT NULL,
+                navigation_mode TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             );
 
             INSERT INTO schema_metadata(key, value)

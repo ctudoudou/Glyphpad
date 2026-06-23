@@ -30,7 +30,8 @@ let package = Package(
         .executableTarget(
             name: "GlyphpadApp",
             dependencies: [
-                "GlyphpadCore"
+                "GlyphpadCore",
+                "GlyphpadStorage"
             ]
         ),
         .testTarget(

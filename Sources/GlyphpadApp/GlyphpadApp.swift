@@ -1,4 +1,6 @@
 import AppKit
+import GlyphpadCore
+import GlyphpadStorage
 import SwiftUI
 
 @main
@@ -32,10 +34,10 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
         let window = LauncherWindow(contentRect: frame)
         window.dismissHandler = { [weak self] in self?.dismissLauncher() }
 
-        let rootView = LauncherView(
-            settings: LauncherSettings.default,
-            onDismiss: { [weak self] in self?.dismissLauncher() }
-        )
+        let settingsController = LauncherSettingsController()
+        let rootView = LauncherView(settingsController: settingsController) { [weak self] in
+            self?.dismissLauncher()
+        }
 
         window.contentView = NSHostingView(rootView: rootView)
         window.setFrame(frame, display: true)
@@ -107,39 +109,13 @@ private final class LauncherWindow: NSWindow {
     }
 }
 
-private struct LauncherSettings: Equatable {
-    var columns: Int
-    var rows: Int
-    var iconSize: CGFloat
-    var navigationMode: NavigationMode
-
-    var clampedColumns: Int { min(max(columns, 4), 12) }
-    var clampedRows: Int { min(max(rows, 3), 8) }
-    var clampedIconSize: CGFloat { min(max(iconSize, 48), 112) }
-    var tileWidth: CGFloat { clampedIconSize + 38 }
-    var tileHeight: CGFloat { clampedIconSize + 52 }
-    var horizontalSpacing: CGFloat { max(18, clampedIconSize * 0.32) }
-    var verticalSpacing: CGFloat { max(20, clampedIconSize * 0.34) }
-
-    static let `default` = LauncherSettings(
-        columns: 7,
-        rows: 5,
-        iconSize: 76,
-        navigationMode: .verticalScroll
-    )
-}
-
-private enum NavigationMode: String, Equatable {
-    case verticalScroll
-    case horizontalPages
-}
-
 private struct LauncherView: View {
-    let settings: LauncherSettings
+    @ObservedObject var settingsController: LauncherSettingsController
     let onDismiss: () -> Void
 
     @StateObject private var library = ApplicationLibrary()
     @State private var searchText = ""
+    @State private var showsSettings = false
     @State private var visible = false
 
     private var filteredApps: [InstalledApplication] {
@@ -154,7 +130,7 @@ private struct LauncherView: View {
         }
     }
 
-    private var gridColumns: [GridItem] {
+    private func gridColumns(for settings: LauncherSettings) -> [GridItem] {
         Array(
             repeating: GridItem(.fixed(settings.tileWidth), spacing: settings.horizontalSpacing, alignment: .top),
             count: settings.clampedColumns
@@ -170,8 +146,31 @@ private struct LauncherView: View {
                     }
 
                 VStack(spacing: 30) {
-                    SearchField(text: $searchText)
-                        .padding(.top, max(42, proxy.safeAreaInsets.top + 28))
+                    HStack {
+                        Spacer()
+
+                        SearchField(text: $searchText)
+
+                        Spacer()
+
+                        Button {
+                            showsSettings.toggle()
+                        } label: {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 20, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.86))
+                                .frame(width: 46, height: 46)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .overlay {
+                                    Circle()
+                                        .stroke(.white.opacity(0.16), lineWidth: 1)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .help("Settings")
+                    }
+                    .padding(.horizontal, 54)
+                    .padding(.top, max(42, proxy.safeAreaInsets.top + 28))
 
                     launcherContent(maxSize: proxy.size)
 
@@ -182,8 +181,17 @@ private struct LauncherView: View {
                 .scaleEffect(visible ? 1 : 0.985)
                 .opacity(visible ? 1 : 0)
                 .animation(.easeOut(duration: 0.18), value: visible)
+
+                if showsSettings {
+                    SettingsPanel(controller: settingsController)
+                        .padding(.top, max(100, proxy.safeAreaInsets.top + 84))
+                        .padding(.trailing, 54)
+                        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topTrailing)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topTrailing)))
+                }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
+            .animation(.easeOut(duration: 0.16), value: showsSettings)
         }
         .ignoresSafeArea()
         .focusable()
@@ -198,6 +206,7 @@ private struct LauncherView: View {
 
     @ViewBuilder
     private func launcherContent(maxSize: CGSize) -> some View {
+        let settings = settingsController.settings.fitting(maxSize: maxSize)
         let maxGridWidth = min(
             maxSize.width - 96,
             CGFloat(settings.clampedColumns) * settings.tileWidth
@@ -219,7 +228,7 @@ private struct LauncherView: View {
             switch settings.navigationMode {
             case .verticalScroll:
                 ScrollView(.vertical, showsIndicators: false) {
-                    LazyVGrid(columns: gridColumns, spacing: settings.verticalSpacing) {
+                    LazyVGrid(columns: gridColumns(for: settings), spacing: settings.verticalSpacing) {
                         ForEach(filteredApps) { app in
                             AppTile(app: app, settings: settings) {
                                 library.launch(app)
@@ -250,6 +259,136 @@ private struct LauncherView: View {
         visible = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
             onDismiss()
+        }
+    }
+}
+
+@MainActor
+private final class LauncherSettingsController: ObservableObject {
+    @Published private(set) var settings: LauncherSettings
+
+    private var repository: SQLiteLauncherSettingsRepository?
+
+    init() {
+        do {
+            let store = try AppStoreFactory.makeStore()
+            let repository = store.launcherSettingsRepository()
+            self.repository = repository
+            self.settings = try repository.load()
+        } catch {
+            NSLog("Failed to load launcher settings: \(error.localizedDescription)")
+            self.repository = nil
+            self.settings = .default
+        }
+    }
+
+    func update(_ transform: (inout LauncherSettings) -> Void) {
+        var next = settings
+        transform(&next)
+        settings = next.clamped()
+        persist()
+    }
+
+    private func persist() {
+        do {
+            try repository?.save(settings)
+        } catch {
+            NSLog("Failed to save launcher settings: \(error.localizedDescription)")
+        }
+    }
+}
+
+private enum AppStoreFactory {
+    static func makeStore() throws -> GlyphpadStore {
+        let fileManager = FileManager.default
+        let directory = try applicationSupportDirectory(fileManager: fileManager)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let path = directory.appendingPathComponent("Glyphpad.sqlite").path
+        return try GlyphpadStore(path: path)
+    }
+
+    private static func applicationSupportDirectory(fileManager: FileManager) throws -> URL {
+        if let directory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            return directory.appendingPathComponent("Glyphpad", isDirectory: true)
+        }
+
+        return URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Application Support/Glyphpad", isDirectory: true)
+    }
+}
+
+private struct SettingsPanel: View {
+    @ObservedObject var controller: LauncherSettingsController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Layout")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.white)
+
+            Toggle("Auto arrange", isOn: Binding(
+                get: { controller.settings.autoArrange },
+                set: { value in controller.update { $0.autoArrange = value } }
+            ))
+
+            Stepper(value: Binding(
+                get: { controller.settings.columns },
+                set: { value in controller.update { $0.columns = value } }
+            ), in: 4...12) {
+                SettingValueLabel(title: "Columns", value: "\(controller.settings.clampedColumns)")
+            }
+            .disabled(controller.settings.autoArrange)
+
+            Stepper(value: Binding(
+                get: { controller.settings.rows },
+                set: { value in controller.update { $0.rows = value } }
+            ), in: 3...8) {
+                SettingValueLabel(title: "Rows", value: "\(controller.settings.clampedRows)")
+            }
+            .disabled(controller.settings.autoArrange)
+
+            VStack(alignment: .leading, spacing: 8) {
+                SettingValueLabel(title: "Icon size", value: "\(Int(controller.settings.clampedIconSize))")
+
+                Slider(value: Binding(
+                    get: { Double(controller.settings.iconSize) },
+                    set: { value in controller.update { $0.iconSize = CGFloat(value) } }
+                ), in: 48...112, step: 2)
+            }
+
+            Picker("Navigation", selection: Binding(
+                get: { controller.settings.navigationMode },
+                set: { value in controller.update { $0.navigationMode = value } }
+            )) {
+                Text("Vertical").tag(LauncherNavigationMode.verticalScroll)
+                Text("Pages").tag(LauncherNavigationMode.horizontalPages)
+            }
+            .pickerStyle(.segmented)
+        }
+        .toggleStyle(.switch)
+        .foregroundStyle(.white)
+        .controlSize(.regular)
+        .padding(18)
+        .frame(width: 292)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(.white.opacity(0.14), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.32), radius: 22, x: 0, y: 14)
+    }
+}
+
+private struct SettingValueLabel: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.white.opacity(0.68))
         }
     }
 }
