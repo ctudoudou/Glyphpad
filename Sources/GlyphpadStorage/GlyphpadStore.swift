@@ -1,7 +1,7 @@
 import Foundation
 
 public final class GlyphpadStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 2
+    public static let currentSchemaVersion = 3
 
     private let database: SQLiteDatabase
 
@@ -16,6 +16,10 @@ public final class GlyphpadStore: @unchecked Sendable {
 
     public func launcherSettingsRepository() -> SQLiteLauncherSettingsRepository {
         SQLiteLauncherSettingsRepository(database: database)
+    }
+
+    public func folderRepository() -> SQLiteFolderRepository {
+        SQLiteFolderRepository(database: database)
     }
 
     private func migrate() throws {
@@ -48,7 +52,16 @@ public final class GlyphpadStore: @unchecked Sendable {
                 id TEXT PRIMARY KEY NOT NULL,
                 name TEXT NOT NULL,
                 page_index INTEGER NOT NULL,
-                position_index INTEGER NOT NULL
+                position_index INTEGER NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS folder_members (
+                folder_id TEXT NOT NULL,
+                app_bundle_identifier TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                PRIMARY KEY(folder_id, app_bundle_identifier),
+                FOREIGN KEY(folder_id) REFERENCES folders(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS layout_items (
@@ -88,5 +101,7 @@ public final class GlyphpadStore: @unchecked Sendable {
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             """
         )
+
+        try? database.execute("ALTER TABLE folders ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';")
     }
 }

@@ -116,17 +116,23 @@ private struct LauncherView: View {
     @StateObject private var library = ApplicationLibrary()
     @State private var searchText = ""
     @State private var showsSettings = false
+    @State private var openFolder: FolderRecord?
     @State private var visible = false
 
-    private var filteredApps: [InstalledApplication] {
+    private var filteredItems: [LauncherItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else {
-            return library.apps
+            return library.launcherItems
         }
 
-        return library.apps.filter { app in
-            app.displayName.localizedCaseInsensitiveContains(query)
-                || app.bundleIdentifier?.localizedCaseInsensitiveContains(query) == true
+        return library.launcherItems.filter { item in
+            switch item {
+            case .app(let app):
+                app.displayName.localizedCaseInsensitiveContains(query)
+                    || app.bundleIdentifier?.localizedCaseInsensitiveContains(query) == true
+            case .folder(let folder):
+                folder.name.localizedCaseInsensitiveContains(query)
+            }
         }
     }
 
@@ -189,9 +195,30 @@ private struct LauncherView: View {
                         .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topTrailing)
                         .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topTrailing)))
                 }
+
+                if let folder = openFolder {
+                    FolderOverlay(
+                        folder: folder,
+                        apps: library.apps(in: folder),
+                        settings: settingsController.settings.fitting(maxSize: proxy.size),
+                        rename: { name in
+                            library.rename(folder: folder, name: name)
+                            openFolder = library.folder(id: folder.id)
+                        },
+                        launch: { app in
+                            library.launch(app)
+                            dismiss()
+                        },
+                        close: {
+                            openFolder = nil
+                        }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
             .animation(.easeOut(duration: 0.16), value: showsSettings)
+            .animation(.easeOut(duration: 0.18), value: openFolder?.id)
         }
         .ignoresSafeArea()
         .focusable()
@@ -221,7 +248,7 @@ private struct LauncherView: View {
             )
         )
 
-        if filteredApps.isEmpty {
+        if filteredItems.isEmpty {
             EmptySearchView()
                 .frame(width: maxGridWidth, height: maxGridHeight)
         } else {
@@ -229,11 +256,17 @@ private struct LauncherView: View {
             case .verticalScroll:
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVGrid(columns: gridColumns(for: settings), spacing: settings.verticalSpacing) {
-                        ForEach(filteredApps) { app in
-                            AppTile(app: app, settings: settings) {
-                                library.launch(app)
-                                dismiss()
-                            }
+                        ForEach(filteredItems) { item in
+                            LauncherItemTile(
+                                item: item,
+                                settings: settings,
+                                library: library,
+                                openFolder: { folder in self.openFolder = folder },
+                                launch: { app in
+                                    library.launch(app)
+                                    dismiss()
+                                }
+                            )
                         }
                     }
                     .padding(.vertical, 6)
@@ -242,10 +275,12 @@ private struct LauncherView: View {
                 .clipped()
             case .horizontalPages:
                 PagedLauncherGrid(
-                    apps: filteredApps,
+                    items: filteredItems,
                     settings: settings,
                     maxGridWidth: maxGridWidth,
                     maxGridHeight: maxGridHeight,
+                    library: library,
+                    openFolder: { folder in self.openFolder = folder },
                     launch: { app in
                         library.launch(app)
                         dismiss()
@@ -379,6 +414,77 @@ private struct SettingsPanel: View {
     }
 }
 
+private struct FolderOverlay: View {
+    let folder: FolderRecord
+    let apps: [InstalledApplication]
+    let settings: LauncherSettings
+    let rename: (String) -> Void
+    let launch: (InstalledApplication) -> Void
+    let close: () -> Void
+
+    @State private var draftName: String
+
+    init(
+        folder: FolderRecord,
+        apps: [InstalledApplication],
+        settings: LauncherSettings,
+        rename: @escaping (String) -> Void,
+        launch: @escaping (InstalledApplication) -> Void,
+        close: @escaping () -> Void
+    ) {
+        self.folder = folder
+        self.apps = apps
+        self.settings = settings
+        self.rename = rename
+        self.launch = launch
+        self.close = close
+        _draftName = State(initialValue: folder.name)
+    }
+
+    private var columns: [GridItem] {
+        Array(
+            repeating: GridItem(.fixed(settings.tileWidth), spacing: settings.horizontalSpacing, alignment: .top),
+            count: min(max(apps.count, 2), 4)
+        )
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.24)
+                .ignoresSafeArea()
+                .onTapGesture(perform: close)
+
+            VStack(spacing: 20) {
+                TextField("Folder name", text: $draftName, onCommit: {
+                    rename(draftName)
+                })
+                .textFieldStyle(.plain)
+                .font(.system(size: 24, weight: .semibold))
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.white)
+                .frame(width: 320)
+                .padding(.top, 24)
+
+                LazyVGrid(columns: columns, spacing: settings.verticalSpacing) {
+                    ForEach(apps) { app in
+                        AppTile(app: app, settings: settings) {
+                            launch(app)
+                        }
+                    }
+                }
+                .padding(.horizontal, 28)
+                .padding(.bottom, 28)
+            }
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .stroke(.white.opacity(0.14), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.36), radius: 28, x: 0, y: 16)
+        }
+    }
+}
+
 private struct SettingValueLabel: View {
     let title: String
     let value: String
@@ -394,19 +500,21 @@ private struct SettingValueLabel: View {
 }
 
 private struct PagedLauncherGrid: View {
-    let apps: [InstalledApplication]
+    let items: [LauncherItem]
     let settings: LauncherSettings
     let maxGridWidth: CGFloat
     let maxGridHeight: CGFloat
+    @ObservedObject var library: ApplicationLibrary
+    let openFolder: (FolderRecord) -> Void
     let launch: (InstalledApplication) -> Void
 
     private var pageSize: Int {
         settings.clampedColumns * settings.clampedRows
     }
 
-    private var pages: [[InstalledApplication]] {
-        stride(from: 0, to: apps.count, by: pageSize).map { index in
-            Array(apps[index..<min(index + pageSize, apps.count)])
+    private var pages: [[LauncherItem]] {
+        stride(from: 0, to: items.count, by: pageSize).map { index in
+            Array(items[index..<min(index + pageSize, items.count)])
         }
     }
 
@@ -422,10 +530,14 @@ private struct PagedLauncherGrid: View {
             LazyHStack(spacing: 0) {
                 ForEach(Array(pages.enumerated()), id: \.offset) { _, page in
                     LazyVGrid(columns: columns, spacing: settings.verticalSpacing) {
-                        ForEach(page) { app in
-                            AppTile(app: app, settings: settings) {
-                                launch(app)
-                            }
+                        ForEach(page) { item in
+                            LauncherItemTile(
+                                item: item,
+                                settings: settings,
+                                library: library,
+                                openFolder: openFolder,
+                                launch: launch
+                            )
                         }
                     }
                     .frame(width: maxGridWidth, height: maxGridHeight, alignment: .top)
@@ -434,6 +546,38 @@ private struct PagedLauncherGrid: View {
         }
         .frame(width: maxGridWidth, height: maxGridHeight)
         .clipped()
+    }
+}
+
+private struct LauncherItemTile: View {
+    let item: LauncherItem
+    let settings: LauncherSettings
+    @ObservedObject var library: ApplicationLibrary
+    let openFolder: (FolderRecord) -> Void
+    let launch: (InstalledApplication) -> Void
+
+    var body: some View {
+        switch item {
+        case .app(let app):
+            AppTile(app: app, settings: settings) {
+                launch(app)
+            }
+            .draggable(app.id)
+            .dropDestination(for: String.self) { draggedIDs, _ in
+                guard let draggedID = draggedIDs.first else {
+                    return false
+                }
+                return library.createFolder(sourceAppID: draggedID, targetAppID: app.id) != nil
+            }
+        case .folder(let folder):
+            FolderTile(
+                folder: folder,
+                memberApps: library.apps(in: folder),
+                settings: settings
+            ) {
+                openFolder(folder)
+            }
+        }
     }
 }
 
@@ -489,6 +633,51 @@ private struct AppTile: View {
         }
         .buttonStyle(.plain)
         .help(app.bundleIdentifier ?? app.url.path)
+    }
+}
+
+private struct FolderTile: View {
+    let folder: FolderRecord
+    let memberApps: [InstalledApplication]
+    let settings: LauncherSettings
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            VStack(spacing: 9) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .fill(.white.opacity(0.14))
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.fixed(settings.clampedIconSize * 0.28), spacing: 4), count: 2),
+                        spacing: 4
+                    ) {
+                        ForEach(memberApps.prefix(4)) { app in
+                            Image(nsImage: app.icon)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: settings.clampedIconSize * 0.28, height: settings.clampedIconSize * 0.28)
+                        }
+                    }
+                }
+                .frame(width: settings.clampedIconSize, height: settings.clampedIconSize)
+                .shadow(color: .black.opacity(0.26), radius: 10, x: 0, y: 6)
+
+                Text(folder.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .shadow(color: .black.opacity(0.45), radius: 2, x: 0, y: 1)
+                    .frame(width: settings.tileWidth, height: 34, alignment: .top)
+            }
+            .frame(width: settings.tileWidth, height: settings.tileHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(folder.name)
     }
 }
 
@@ -555,21 +744,33 @@ private struct VisualEffectView: NSViewRepresentable {
 @MainActor
 private final class ApplicationLibrary: ObservableObject {
     @Published private(set) var apps: [InstalledApplication] = []
+    @Published private(set) var folders: [FolderRecord] = []
 
     private let iconCache = IconCache()
     private let appRepository: SQLiteAppRepository?
+    private let folderRepository: SQLiteFolderRepository?
     private var refreshTask: Task<Void, Never>?
 
     init() {
         do {
-            self.appRepository = try AppStoreFactory.makeStore().appRepository()
+            let store = try AppStoreFactory.makeStore()
+            self.appRepository = store.appRepository()
+            self.folderRepository = store.folderRepository()
         } catch {
             NSLog("Failed to open app cache store: \(error.localizedDescription)")
             self.appRepository = nil
+            self.folderRepository = nil
         }
     }
 
+    var launcherItems: [LauncherItem] {
+        let folderedIDs = Set(folders.flatMap(\.appBundleIdentifiers))
+        let visibleApps = apps.filter { !folderedIDs.contains($0.id) }
+        return folders.map(LauncherItem.folder) + visibleApps.map(LauncherItem.app)
+    }
+
     func reload() {
+        loadFolders()
         loadCachedApps()
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
@@ -597,6 +798,62 @@ private final class ApplicationLibrary: ObservableObject {
         }
     }
 
+    func folder(id: UUID) -> FolderRecord? {
+        folders.first { $0.id == id }
+    }
+
+    func apps(in folder: FolderRecord) -> [InstalledApplication] {
+        var appByID: [String: InstalledApplication] = [:]
+        for app in apps where appByID[app.id] == nil {
+            appByID[app.id] = app
+        }
+        return folder.appBundleIdentifiers.compactMap { appByID[$0] }
+    }
+
+    func createFolder(sourceAppID: String, targetAppID: String) -> FolderRecord? {
+        guard sourceAppID != targetAppID else {
+            return nil
+        }
+        guard folderRepository != nil else {
+            return nil
+        }
+        guard apps.contains(where: { $0.id == sourceAppID }), apps.contains(where: { $0.id == targetAppID }) else {
+            return nil
+        }
+        if folders.contains(where: { folder in
+            folder.appBundleIdentifiers.contains(sourceAppID) || folder.appBundleIdentifiers.contains(targetAppID)
+        }) {
+            return nil
+        }
+
+        do {
+            let folder = try folderRepository?.create(
+                name: "Untitled Folder",
+                appBundleIdentifiers: [targetAppID, sourceAppID],
+                positionIndex: folders.count
+            )
+            loadFolders()
+            return folder
+        } catch {
+            NSLog("Failed to create folder: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    func rename(folder: FolderRecord, name: String) {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            return
+        }
+
+        do {
+            try folderRepository?.rename(folderID: folder.id, name: trimmedName)
+            loadFolders()
+        } catch {
+            NSLog("Failed to rename folder: \(error.localizedDescription)")
+        }
+    }
+
     private func loadCachedApps() {
         guard let appRepository else {
             return
@@ -614,10 +871,18 @@ private final class ApplicationLibrary: ObservableObject {
         }
     }
 
-    private func publish(_ scannedApps: [ScannedApplication]) {
-        apps = scannedApps.map { app in
-            InstalledApplication(scannedApp: app, iconCache: iconCache)
+    private func loadFolders() {
+        do {
+            folders = try folderRepository?.fetchAll() ?? []
+        } catch {
+            NSLog("Failed to load folders: \(error.localizedDescription)")
         }
+    }
+
+    private func publish(_ scannedApps: [ScannedApplication]) {
+        apps = dedupe(scannedApps.map { app in
+            InstalledApplication(scannedApp: app, iconCache: iconCache)
+        })
     }
 
     private func persist(_ scannedApps: [ScannedApplication]) {
@@ -631,6 +896,25 @@ private final class ApplicationLibrary: ObservableObject {
             }
         } catch {
             NSLog("Failed to persist app cache: \(error.localizedDescription)")
+        }
+    }
+
+    private func dedupe(_ apps: [InstalledApplication]) -> [InstalledApplication] {
+        var seen = Set<String>()
+        return apps.filter { seen.insert($0.id).inserted }
+    }
+}
+
+private enum LauncherItem: Identifiable, Equatable {
+    case folder(FolderRecord)
+    case app(InstalledApplication)
+
+    var id: String {
+        switch self {
+        case .folder(let folder):
+            "folder-\(folder.id.uuidString)"
+        case .app(let app):
+            "app-\(app.id)"
         }
     }
 }
