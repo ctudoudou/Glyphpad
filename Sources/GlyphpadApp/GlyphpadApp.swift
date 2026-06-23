@@ -3,6 +3,10 @@ import GlyphpadCore
 import GlyphpadStorage
 import SwiftUI
 
+private extension Notification.Name {
+    static let glyphpadToggleSettings = Notification.Name("GlyphpadToggleSettings")
+}
+
 @main
 @MainActor
 private struct GlyphpadMain {
@@ -105,6 +109,12 @@ private final class LauncherWindow: NSWindow {
             return
         }
 
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
+           event.charactersIgnoringModifiers == "," {
+            NotificationCenter.default.post(name: .glyphpadToggleSettings, object: nil)
+            return
+        }
+
         super.keyDown(with: event)
     }
 }
@@ -151,36 +161,13 @@ private struct LauncherView: View {
                         dismiss()
                     }
 
-                VStack(spacing: 30) {
-                    HStack {
-                        Spacer()
-
-                        SearchField(text: $searchText)
-
-                        Spacer()
-
-                        Button {
-                            showsSettings.toggle()
-                        } label: {
-                            Image(systemName: "slider.horizontal.3")
-                                .font(.system(size: 20, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.86))
-                                .frame(width: 46, height: 46)
-                                .background(.ultraThinMaterial, in: Circle())
-                                .overlay {
-                                    Circle()
-                                        .stroke(.white.opacity(0.16), lineWidth: 1)
-                                }
-                        }
-                        .buttonStyle(.plain)
-                        .help("Settings")
-                    }
-                    .padding(.horizontal, 54)
-                    .padding(.top, max(42, proxy.safeAreaInsets.top + 28))
+                VStack(spacing: 34) {
+                    SearchField(text: $searchText)
+                        .padding(.top, max(42, proxy.safeAreaInsets.top + 28))
 
                     launcherContent(maxSize: proxy.size)
 
-                    PageDots()
+                    pageIndicator(settings: settingsController.settings.fitting(maxSize: proxy.size))
                         .padding(.bottom, max(28, proxy.safeAreaInsets.bottom + 18))
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
@@ -228,6 +215,9 @@ private struct LauncherView: View {
         }
         .onExitCommand {
             dismiss()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .glyphpadToggleSettings)) { _ in
+            showsSettings.toggle()
         }
     }
 
@@ -294,6 +284,17 @@ private struct LauncherView: View {
         visible = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
             onDismiss()
+        }
+    }
+
+    @ViewBuilder
+    private func pageIndicator(settings: LauncherSettings) -> some View {
+        if settings.navigationMode == .horizontalPages {
+            let pageSize = max(1, settings.clampedColumns * settings.clampedRows)
+            let pageCount = max(1, Int(ceil(Double(filteredItems.count) / Double(pageSize))))
+            PageDots(pageCount: pageCount)
+        } else {
+            Color.clear.frame(width: 1, height: 8)
         }
     }
 }
@@ -695,28 +696,36 @@ private struct EmptySearchView: View {
 }
 
 private struct PageDots: View {
+    let pageCount: Int
+
     var body: some View {
         HStack(spacing: 8) {
-            Circle().fill(.white)
-            Circle().fill(.white.opacity(0.35))
+            ForEach(0..<pageCount, id: \.self) { index in
+                Circle()
+                    .fill(index == 0 ? .white.opacity(0.9) : .white.opacity(0.32))
+                    .frame(width: 7, height: 7)
+            }
         }
-        .frame(width: 30, height: 8)
+        .frame(height: 8)
     }
 }
 
 private struct DesktopBackdrop: View {
     var body: some View {
         ZStack {
-            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
+            VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
 
-            LinearGradient(
+            Color.black.opacity(0.20)
+
+            RadialGradient(
                 colors: [
-                    Color.black.opacity(0.54),
-                    Color(red: 0.08, green: 0.09, blue: 0.12).opacity(0.68),
-                    Color.black.opacity(0.58)
+                    Color.white.opacity(0.13),
+                    Color.white.opacity(0.02),
+                    Color.black.opacity(0.18)
                 ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+                center: .top,
+                startRadius: 80,
+                endRadius: 760
             )
         }
     }
