@@ -552,14 +552,38 @@ private struct VisualEffectView: NSViewRepresentable {
     }
 }
 
+@MainActor
 private final class ApplicationLibrary: ObservableObject {
     @Published private(set) var apps: [InstalledApplication] = []
 
-    private let scanner = ApplicationScanner()
+    private let iconCache = IconCache()
+    private let appRepository: SQLiteAppRepository?
+    private var refreshTask: Task<Void, Never>?
+
+    init() {
+        do {
+            self.appRepository = try AppStoreFactory.makeStore().appRepository()
+        } catch {
+            NSLog("Failed to open app cache store: \(error.localizedDescription)")
+            self.appRepository = nil
+        }
+    }
 
     func reload() {
-        let scannedApps = scanner.scan()
-        apps = scannedApps
+        loadCachedApps()
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
+            let scannedApps = await Task.detached(priority: .userInitiated) {
+                ApplicationScanner().scan()
+            }.value
+
+            guard !Task.isCancelled else {
+                return
+            }
+
+            self?.publish(scannedApps)
+            self?.persist(scannedApps)
+        }
     }
 
     func launch(_ app: InstalledApplication) {
@@ -572,6 +596,43 @@ private final class ApplicationLibrary: ObservableObject {
             }
         }
     }
+
+    private func loadCachedApps() {
+        guard let appRepository else {
+            return
+        }
+
+        do {
+            let cachedApps = try appRepository.fetchAll().compactMap { record in
+                InstalledApplication(record: record, iconCache: iconCache)
+            }
+            if !cachedApps.isEmpty {
+                apps = cachedApps
+            }
+        } catch {
+            NSLog("Failed to load cached apps: \(error.localizedDescription)")
+        }
+    }
+
+    private func publish(_ scannedApps: [ScannedApplication]) {
+        apps = scannedApps.map { app in
+            InstalledApplication(scannedApp: app, iconCache: iconCache)
+        }
+    }
+
+    private func persist(_ scannedApps: [ScannedApplication]) {
+        guard let appRepository else {
+            return
+        }
+
+        do {
+            for app in scannedApps {
+                try appRepository.upsert(app.appRecord())
+            }
+        } catch {
+            NSLog("Failed to persist app cache: \(error.localizedDescription)")
+        }
+    }
 }
 
 private struct InstalledApplication: Identifiable, Equatable {
@@ -581,17 +642,71 @@ private struct InstalledApplication: Identifiable, Equatable {
     let bundleIdentifier: String?
     let icon: NSImage
 
+    init(scannedApp: ScannedApplication, iconCache: IconCache) {
+        self.id = scannedApp.id
+        self.url = scannedApp.url
+        self.displayName = scannedApp.displayName
+        self.bundleIdentifier = scannedApp.bundleIdentifier
+        self.icon = iconCache.icon(for: scannedApp.url)
+    }
+
+    init?(record: AppRecord, iconCache: IconCache) {
+        guard let executablePath = record.executablePath else {
+            return nil
+        }
+
+        let url = URL(fileURLWithPath: executablePath)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+
+        self.id = record.bundleIdentifier
+        self.url = url
+        self.displayName = record.displayName
+        self.bundleIdentifier = record.bundleIdentifier
+        self.icon = iconCache.icon(for: url)
+    }
+
     static func == (lhs: InstalledApplication, rhs: InstalledApplication) -> Bool {
         lhs.id == rhs.id
     }
 }
 
-private struct ApplicationScanner {
-    private let fileManager = FileManager.default
+private final class IconCache {
+    private let cache = NSCache<NSURL, NSImage>()
 
-    func scan() -> [InstalledApplication] {
+    func icon(for url: URL) -> NSImage {
+        let key = url as NSURL
+        if let cachedIcon = cache.object(forKey: key) {
+            return cachedIcon
+        }
+
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        icon.size = NSSize(width: 128, height: 128)
+        cache.setObject(icon, forKey: key)
+        return icon
+    }
+}
+
+private struct ScannedApplication: Sendable {
+    let id: String
+    let url: URL
+    let displayName: String
+    let bundleIdentifier: String?
+
+    func appRecord() -> AppRecord {
+        AppRecord(
+            bundleIdentifier: bundleIdentifier ?? id,
+            displayName: displayName,
+            executablePath: url.path
+        )
+    }
+}
+
+private struct ApplicationScanner: Sendable {
+    func scan() -> [ScannedApplication] {
         var seenPaths = Set<String>()
-        var apps: [InstalledApplication] = []
+        var apps: [ScannedApplication] = []
 
         for root in scanRoots() {
             for appURL in appBundleURLs(under: root) {
@@ -614,6 +729,7 @@ private struct ApplicationScanner {
     }
 
     private func scanRoots() -> [URL] {
+        let fileManager = FileManager.default
         var roots = [
             URL(fileURLWithPath: "/Applications", isDirectory: true),
             URL(fileURLWithPath: "/System/Applications", isDirectory: true),
@@ -628,6 +744,7 @@ private struct ApplicationScanner {
     }
 
     private func appBundleURLs(under root: URL) -> [URL] {
+        let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: root.path) else {
             return []
         }
@@ -659,7 +776,7 @@ private struct ApplicationScanner {
         return urls
     }
 
-    private func makeApplication(from url: URL) -> InstalledApplication? {
+    private func makeApplication(from url: URL) -> ScannedApplication? {
         guard let bundle = Bundle(url: url) else {
             return nil
         }
@@ -671,15 +788,12 @@ private struct ApplicationScanner {
 
         let bundleIdentifier = bundle.bundleIdentifier
         let id = bundleIdentifier ?? url.resolvingSymlinksInPath().path
-        let icon = NSWorkspace.shared.icon(forFile: url.path)
-        icon.size = NSSize(width: 128, height: 128)
 
-        return InstalledApplication(
+        return ScannedApplication(
             id: id,
             url: url,
             displayName: displayName,
-            bundleIdentifier: bundleIdentifier,
-            icon: icon
+            bundleIdentifier: bundleIdentifier
         )
     }
 }
