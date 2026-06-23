@@ -10,3 +10,17 @@ The project is currently in foundation implementation. See [AGENTS.md](AGENTS.md
 swift build
 swift test
 ```
+
+## Launch Locally
+
+Build a local macOS app bundle:
+
+```sh
+bash scripts/build-app-bundle.sh
+```
+
+Open the generated app:
+
+```sh
+open dist/Glyphpad.app
+```
