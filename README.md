@@ -2,9 +2,11 @@
 
 [中文说明](README.zh-CN.md)
 
-Glyphpad is a native macOS Launchpad replacement for the post-classic-Launchpad era. It keeps the familiar full-screen app grid, search-first interaction, folders, pages, and drag organization model, while adding a separate settings window for layout, appearance, hot keys, and future LLM-assisted app classification.
+Glyphpad brings the classic Launchpad feeling back to modern macOS: a fast full-screen app grid, instant search, familiar folders, page navigation, and drag organization without turning the launcher into a dashboard.
 
-The project is local-first: discovered apps, launcher layout, folders, settings, and classification data are stored in SQLite under the user's Application Support directory.
+It is intentionally small, native, and local-first. The current local app bundle is only about **3 MB**, and discovered apps, launcher layout, folders, settings, and classification data live in SQLite under the user's Application Support directory.
+
+Configuration stays out of the way in a separate settings window, where Glyphpad can grow into automatic and LLM-assisted app organization without making the launcher itself feel heavy.
 
 ## Screenshot
 
@@ -12,17 +14,18 @@ The project is local-first: discovered apps, launcher layout, folders, settings,
 
 ## Features
 
-- Full-screen Launchpad-style app grid with blurred desktop-style backdrop.
-- Search field focused on launch for immediate keyboard filtering.
+- A tiny native app bundle, currently only about **3 MB**.
+- Full-screen Launchpad-style app grid with a soft blurred backdrop.
+- Search is focused on launch, so you can type first and think later.
 - Native app discovery from standard macOS application directories.
 - Manual app organization with persistent drag sorting.
-- Folders with editable names, app grouping, drag-in, drag-out, and automatic empty-folder cleanup.
-- Vertical scrolling mode and horizontal page mode with snap paging.
-- Page dots for horizontal navigation.
-- Customizable grid density, rows, columns, icon size, and auto-arrange behavior.
-- Custom background image and blur radius.
-- Separate settings window for launcher layout, appearance, hot key, and API configuration.
-- Custom global hot key for showing or hiding Glyphpad.
+- Folders that behave like folders: rename, group apps, drag in, drag out, and let empty folders disappear.
+- Vertical scroll when you want a flowing list, horizontal pages when you want the classic Launchpad rhythm.
+- Page dots that stay in sync with horizontal navigation.
+- Tunable density: rows, columns, icon size, and auto-arrange behavior.
+- Custom background image and blur strength.
+- A separate settings window for layout, appearance, hot key, and API configuration.
+- A custom global hot key to summon or dismiss Glyphpad quickly.
 - SQLite-backed local persistence for apps, folders, layout, and settings.
 - OpenAI-compatible API settings are present as the configuration surface for future automatic classification workflows.
 
@@ -48,6 +51,7 @@ Build the app scheme with Xcode:
 ```sh
 xcodebuild -scheme GlyphpadApp -destination 'platform=macOS' build
 ```
+
 Create a local app bundle:
 
 ```sh

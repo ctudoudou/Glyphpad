@@ -12,3 +12,6 @@ Only the verified launcher screenshot is included. An attempted settings screens
 
 Chinese documentation lives in `README.zh-CN.md` and links back to the English README. The English README links to it at the top.
 
+## Size Claim
+
+The README describes the local app bundle as about 3 MB because the current generated `dist/Glyphpad.app` measures 2.8 MB. This keeps the statement useful without implying a fixed release size.
