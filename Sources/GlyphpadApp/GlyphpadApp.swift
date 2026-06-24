@@ -1326,6 +1326,7 @@ private final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         orderedItems += baseItems.filter { usedIDs.insert($0.id).inserted }
 
         launcherItems = orderedItems
+        persistLayoutIfNeeded(for: orderedItems)
     }
 
     private func moveItem(draggedItemID: String, before targetItemID: String) -> Bool {
@@ -1357,9 +1358,22 @@ private final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
     }
 
     private func saveCurrentLayout() {
-        layoutOrder = launcherItems.map(\.id)
+        saveLayout(for: launcherItems)
+    }
+
+    private func persistLayoutIfNeeded(for items: [LauncherItem]) {
+        let nextLayoutOrder = items.map(\.id)
+        guard !nextLayoutOrder.isEmpty, nextLayoutOrder != layoutOrder else {
+            return
+        }
+
+        saveLayout(for: items)
+    }
+
+    private func saveLayout(for items: [LauncherItem]) {
+        layoutOrder = items.map(\.id)
         do {
-            try layoutRepository?.replaceAll(launcherItems.enumerated().map { index, item in
+            try layoutRepository?.replaceAll(items.enumerated().map { index, item in
                 LauncherLayoutRecord(
                     kind: item.layoutKind,
                     targetIdentifier: item.targetIdentifier,
@@ -1372,7 +1386,7 @@ private final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
     }
 
     private func appSignature(_ apps: [InstalledApplication]) -> [String] {
-        apps.map { "\($0.id)|\($0.displayName)|\($0.url.path)" }
+        apps.map { "\($0.id)|\($0.displayName)|\($0.url.path)" }.sorted()
     }
 
     private func startWatchingApplicationDirectories() {
