@@ -146,7 +146,7 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         }
 
         let settingsWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 560),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -155,6 +155,7 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         settingsWindow.isReleasedWhenClosed = false
         settingsWindow.delegate = self
         settingsWindow.level = .glyphpadSettingsPanel
+        settingsWindow.minSize = NSSize(width: 700, height: 520)
         settingsWindow.center()
         settingsWindow.contentView = NSHostingView(rootView: SettingsWindowView(controller: settingsController))
         settingsWindow.makeKeyAndOrderFront(nil)
@@ -519,29 +520,90 @@ private struct SettingsWindowView: View {
     @State private var selectedSection: SettingsSection = .layout
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Text("Glyphpad Settings")
-                .font(.system(size: 24, weight: .semibold))
+        HStack(spacing: 0) {
+            settingsSidebar
 
-            Picker("Settings section", selection: $selectedSection) {
-                ForEach(SettingsSection.allCases, id: \.self) { section in
-                    Text(section.title).tag(section)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
+            Divider()
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: 22) {
+                    sectionHeader
                     selectedSectionContent
+                    Spacer(minLength: 0)
                 }
-                .padding(.trailing, 8)
+                .padding(.horizontal, 28)
+                .padding(.vertical, 26)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+            .background(Color(nsColor: .windowBackgroundColor).opacity(0.74))
         }
         .toggleStyle(.switch)
         .controlSize(.regular)
-        .padding(24)
-        .frame(width: 560, height: 620)
+        .frame(width: 760, height: 560)
+        .background(VisualEffectView(material: .sidebar, blendingMode: .behindWindow))
+    }
+
+    private var settingsSidebar: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Glyphpad")
+                    .font(.system(size: 22, weight: .semibold))
+                Text("Launchpad controls")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 24)
+
+            VStack(spacing: 5) {
+                ForEach(SettingsSection.allCases) { section in
+                    SettingsSidebarButton(
+                        section: section,
+                        isSelected: selectedSection == section
+                    ) {
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            selectedSection = section
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+
+            Spacer()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Local state")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Label("SQLite backed", systemImage: "checkmark.seal.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.green)
+            }
+            .padding(.horizontal, 18)
+            .padding(.bottom, 18)
+        }
+        .frame(width: 190)
+    }
+
+    private var sectionHeader: some View {
+        HStack(alignment: .center, spacing: 14) {
+            Image(systemName: selectedSection.symbolName)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 42, height: 42)
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(selectedSection.title)
+                    .font(.system(size: 25, weight: .semibold))
+                Text(selectedSection.subtitle)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
     }
 
     @ViewBuilder
@@ -557,109 +619,145 @@ private struct SettingsWindowView: View {
     }
 
     private var layoutSettings: some View {
-        settingsSection("Launcher") {
-            Toggle("Auto arrange", isOn: Binding(
-                get: { controller.settings.autoArrange },
-                set: { value in controller.update { $0.autoArrange = value } }
-            ))
+        VStack(alignment: .leading, spacing: 18) {
+            SettingsGroup(title: "Grid", subtitle: "Tune density while keeping icons inside the screen bounds.") {
+                SettingToggleRow(
+                    title: "Auto arrange",
+                    detail: "Fit rows and columns to the current display automatically.",
+                    isOn: Binding(
+                        get: { controller.settings.autoArrange },
+                        set: { value in controller.update { $0.autoArrange = value } }
+                    )
+                )
 
-            Stepper(value: Binding(
-                get: { controller.settings.columns },
-                set: { value in controller.update { $0.columns = value } }
-            ), in: 4...12) {
-                SettingValueLabel(title: "Columns", value: "\(controller.settings.clampedColumns)")
+                Divider()
+
+                SettingStepperRow(
+                    title: "Columns",
+                    detail: "Icons shown per row.",
+                    value: controller.settings.clampedColumns,
+                    range: 4...12,
+                    isDisabled: controller.settings.autoArrange,
+                    binding: Binding(
+                        get: { controller.settings.columns },
+                        set: { value in controller.update { $0.columns = value } }
+                    )
+                )
+
+                SettingStepperRow(
+                    title: "Rows",
+                    detail: "Rows shown per page.",
+                    value: controller.settings.clampedRows,
+                    range: 3...8,
+                    isDisabled: controller.settings.autoArrange,
+                    binding: Binding(
+                        get: { controller.settings.rows },
+                        set: { value in controller.update { $0.rows = value } }
+                    )
+                )
+
+                Divider()
+
+                SettingSliderRow(
+                    title: "Icon size",
+                    detail: "Controls the visual weight of apps and folders.",
+                    valueText: "\(Int(controller.settings.clampedIconSize)) pt",
+                    value: Binding(
+                        get: { Double(controller.settings.iconSize) },
+                        set: { value in controller.update { $0.iconSize = CGFloat(value) } }
+                    ),
+                    range: 48...112,
+                    step: 2
+                )
             }
-            .disabled(controller.settings.autoArrange)
 
-            Stepper(value: Binding(
-                get: { controller.settings.rows },
-                set: { value in controller.update { $0.rows = value } }
-            ), in: 3...8) {
-                SettingValueLabel(title: "Rows", value: "\(controller.settings.clampedRows)")
+            SettingsGroup(title: "Navigation", subtitle: "Vertical mode scrolls. Horizontal mode snaps page by page.") {
+                Picker("Navigation", selection: Binding(
+                    get: { controller.settings.navigationMode },
+                    set: { value in controller.update { $0.navigationMode = value } }
+                )) {
+                    Text("Vertical Scroll").tag(LauncherNavigationMode.verticalScroll)
+                    Text("Horizontal Pages").tag(LauncherNavigationMode.horizontalPages)
+                }
+                .pickerStyle(.segmented)
+
+                LayoutPreview(settings: controller.settings)
             }
-            .disabled(controller.settings.autoArrange)
-
-            VStack(alignment: .leading, spacing: 8) {
-                SettingValueLabel(title: "Icon size", value: "\(Int(controller.settings.clampedIconSize))")
-
-                Slider(value: Binding(
-                    get: { Double(controller.settings.iconSize) },
-                    set: { value in controller.update { $0.iconSize = CGFloat(value) } }
-                ), in: 48...112, step: 2)
-            }
-
-            Picker("Navigation", selection: Binding(
-                get: { controller.settings.navigationMode },
-                set: { value in controller.update { $0.navigationMode = value } }
-            )) {
-                Text("Vertical").tag(LauncherNavigationMode.verticalScroll)
-                Text("Pages").tag(LauncherNavigationMode.horizontalPages)
-            }
-            .pickerStyle(.segmented)
         }
     }
 
     private var appearanceSettings: some View {
-        settingsSection("Background") {
-            HStack(spacing: 10) {
-                Button("Choose Image") {
-                    chooseBackgroundImage()
+        VStack(alignment: .leading, spacing: 18) {
+            SettingsGroup(title: "Background", subtitle: "Choose the launcher backdrop and blur strength.") {
+                BackgroundPreview(settings: controller.settings)
+
+                HStack(spacing: 10) {
+                    Button {
+                        chooseBackgroundImage()
+                    } label: {
+                        Label("Choose Image", systemImage: "photo")
+                    }
+
+                    Button {
+                        controller.update { $0.backgroundImagePath = nil }
+                    } label: {
+                        Label("Clear", systemImage: "xmark.circle")
+                    }
+                    .disabled(controller.settings.backgroundImagePath == nil)
                 }
 
-                Button("Clear") {
-                    controller.update { $0.backgroundImagePath = nil }
+                if let backgroundImagePath = controller.settings.backgroundImagePath {
+                    Text(backgroundImagePath)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .truncationMode(.middle)
                 }
-                .disabled(controller.settings.backgroundImagePath == nil)
-            }
 
-            if let backgroundImagePath = controller.settings.backgroundImagePath {
-                Text(backgroundImagePath)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                SettingValueLabel(
+                SettingSliderRow(
                     title: "Blur",
-                    value: "\(Int(controller.settings.clampedBackgroundBlurRadius))"
+                    detail: "Softens the selected image behind app icons.",
+                    valueText: "\(Int(controller.settings.clampedBackgroundBlurRadius))",
+                    value: Binding(
+                        get: { Double(controller.settings.backgroundBlurRadius) },
+                        set: { value in controller.update { $0.backgroundBlurRadius = CGFloat(value) } }
+                    ),
+                    range: 0...48,
+                    step: 1
                 )
-
-                Slider(value: Binding(
-                    get: { Double(controller.settings.backgroundBlurRadius) },
-                    set: { value in controller.update { $0.backgroundBlurRadius = CGFloat(value) } }
-                ), in: 0...48, step: 1)
             }
         }
     }
 
     private var automationSettings: some View {
-        settingsSection("API") {
-            TextField("Endpoint", text: Binding(
-                get: { controller.settings.apiEndpoint ?? "" },
-                set: { value in controller.update { $0.apiEndpoint = value } }
-            ))
-            .textFieldStyle(.roundedBorder)
+        SettingsGroup(title: "Classifier API", subtitle: "Used later by automatic app classification.") {
+            VStack(alignment: .leading, spacing: 8) {
+                SettingFieldLabel(title: "Endpoint", detail: "OpenAI-compatible endpoint for classification.")
+                TextField("https://api.example.com/v1", text: Binding(
+                    get: { controller.settings.apiEndpoint ?? "" },
+                    set: { value in controller.update { $0.apiEndpoint = value } }
+                ))
+                .textFieldStyle(.roundedBorder)
+            }
 
-            SecureField("API Key", text: Binding(
-                get: { controller.settings.apiKey ?? "" },
-                set: { value in controller.update { $0.apiKey = value } }
-            ))
-            .textFieldStyle(.roundedBorder)
-        }
-    }
+            VStack(alignment: .leading, spacing: 8) {
+                SettingFieldLabel(title: "API Key", detail: "Stored locally in the Glyphpad SQLite settings record.")
+                SecureField("API key", text: Binding(
+                    get: { controller.settings.apiKey ?? "" },
+                    set: { value in controller.update { $0.apiKey = value } }
+                ))
+                .textFieldStyle(.roundedBorder)
+            }
 
-    @ViewBuilder
-    private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(.system(size: 15, weight: .semibold))
-            content()
+            HStack(spacing: 8) {
+                Image(systemName: apiStatusSymbol)
+                    .foregroundStyle(apiStatusColor)
+                Text(apiStatusText)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 4)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.bottom, 8)
-        Divider()
     }
 
     private func chooseBackgroundImage() {
@@ -673,12 +771,36 @@ private struct SettingsWindowView: View {
             controller.update { $0.backgroundImagePath = url.path }
         }
     }
+
+    private var apiStatusText: String {
+        if controller.settings.apiEndpoint != nil, controller.settings.apiKey != nil {
+            return "Endpoint and key configured"
+        }
+        if controller.settings.apiEndpoint != nil {
+            return "Endpoint configured, API key missing"
+        }
+        return "API is not configured"
+    }
+
+    private var apiStatusSymbol: String {
+        controller.settings.apiEndpoint != nil && controller.settings.apiKey != nil
+            ? "checkmark.circle.fill"
+            : "exclamationmark.circle"
+    }
+
+    private var apiStatusColor: Color {
+        controller.settings.apiEndpoint != nil && controller.settings.apiKey != nil
+            ? .green
+            : .secondary
+    }
 }
 
-private enum SettingsSection: CaseIterable {
+private enum SettingsSection: CaseIterable, Identifiable {
     case layout
     case appearance
     case automation
+
+    var id: Self { self }
 
     var title: String {
         switch self {
@@ -689,6 +811,260 @@ private enum SettingsSection: CaseIterable {
         case .automation:
             return "API"
         }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .layout:
+            return "Rows, columns, icon size, and paging"
+        case .appearance:
+            return "Background image and blur"
+        case .automation:
+            return "Provider settings for classification"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .layout:
+            return "square.grid.3x3.fill"
+        case .appearance:
+            return "photo.fill"
+        case .automation:
+            return "sparkles"
+        }
+    }
+}
+
+private struct SettingsSidebarButton: View {
+    let section: SettingsSection
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: section.symbolName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                    .frame(width: 22)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(section.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text(section.subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.14))
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct SettingsGroup<Content: View>: View {
+    let title: String
+    let subtitle: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 16, weight: .semibold))
+                Text(subtitle)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 14) {
+                content()
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        }
+    }
+}
+
+private struct SettingFieldLabel: View {
+    let title: String
+    let detail: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+            Text(detail)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct SettingToggleRow: View {
+    let title: String
+    let detail: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            SettingFieldLabel(title: title, detail: detail)
+            Spacer()
+            Toggle("", isOn: $isOn)
+                .labelsHidden()
+        }
+    }
+}
+
+private struct SettingStepperRow: View {
+    let title: String
+    let detail: String
+    let value: Int
+    let range: ClosedRange<Int>
+    let isDisabled: Bool
+    @Binding var binding: Int
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            SettingFieldLabel(title: title, detail: detail)
+            Spacer()
+            Text("\(value)")
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .foregroundStyle(isDisabled ? .secondary : .primary)
+                .frame(width: 34, alignment: .trailing)
+            Stepper("", value: $binding, in: range)
+                .labelsHidden()
+                .disabled(isDisabled)
+        }
+        .opacity(isDisabled ? 0.52 : 1)
+    }
+}
+
+private struct SettingSliderRow: View {
+    let title: String
+    let detail: String
+    let valueText: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                SettingFieldLabel(title: title, detail: detail)
+                Spacer()
+                Text(valueText)
+                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: $value, in: range, step: step)
+        }
+    }
+}
+
+private struct LayoutPreview: View {
+    let settings: LauncherSettings
+
+    var body: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.black.opacity(0.18))
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.fixed(14), spacing: 8), count: min(settings.clampedColumns, 8)),
+                    spacing: 8
+                ) {
+                    ForEach(0..<min(settings.clampedRows * min(settings.clampedColumns, 8), 32), id: \.self) { index in
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(index % 5 == 0 ? Color.accentColor.opacity(0.84) : Color.primary.opacity(0.22))
+                            .frame(width: 14, height: 14)
+                    }
+                }
+            }
+            .frame(width: 156, height: 88)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("\(settings.clampedColumns) x \(settings.clampedRows)")
+                    .font(.system(size: 18, weight: .semibold))
+                Text(settings.navigationMode == .horizontalPages ? "Snapped pages" : "Continuous vertical scroll")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Text("Icon \(Int(settings.clampedIconSize)) pt")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+        }
+    }
+}
+
+private struct BackgroundPreview: View {
+    let settings: LauncherSettings
+
+    var body: some View {
+        ZStack {
+            if let image = backgroundImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .blur(radius: min(settings.clampedBackgroundBlurRadius / 4, 10))
+            } else {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.10, green: 0.10, blue: 0.11),
+                        Color(red: 0.23, green: 0.23, blue: 0.25)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+
+            Color.black.opacity(0.18)
+
+            HStack(spacing: 18) {
+                ForEach(0..<5, id: \.self) { index in
+                    VStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(index == 2 ? Color.accentColor : Color.white.opacity(0.78))
+                            .frame(width: 34, height: 34)
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(Color.white.opacity(0.62))
+                            .frame(width: 34, height: 4)
+                    }
+                }
+            }
+        }
+        .frame(height: 112)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.white.opacity(0.18), lineWidth: 1)
+        }
+    }
+
+    private var backgroundImage: NSImage? {
+        guard let path = settings.backgroundImagePath else {
+            return nil
+        }
+        return NSImage(contentsOfFile: path)
     }
 }
 
@@ -829,8 +1205,10 @@ private struct PagedLauncherGrid: View {
                         .frame(width: maxGridWidth, height: maxGridHeight, alignment: .top)
                     }
                 }
+                .scrollTargetLayout()
             }
         }
+        .scrollTargetBehavior(.paging)
         .frame(width: maxGridWidth, height: maxGridHeight)
         .clipped()
     }
