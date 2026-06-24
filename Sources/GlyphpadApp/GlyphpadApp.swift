@@ -52,6 +52,7 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
     private var settingsWindow: NSWindow?
     private let settingsController = LauncherSettingsController()
     private var hotKeyManager: GlobalHotKeyManager?
+    private var isDismissingLauncher = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMenu()
@@ -111,6 +112,7 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
         self.window = window
+        isDismissingLauncher = false
 
         NSApplication.shared.unhide(nil)
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -133,7 +135,13 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
             PerformanceLog.finish("launcher.close.no-window", startedAt: startedAt)
             return
         }
+        guard !isDismissingLauncher else {
+            PerformanceLog.finish("launcher.close.already-dismissing", startedAt: startedAt)
+            return
+        }
 
+        isDismissingLauncher = true
+        window.ignoresMouseEvents = true
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.14
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -141,7 +149,10 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         } completionHandler: {
             DispatchQueue.main.async {
                 PerformanceLog.finish("launcher.close", startedAt: startedAt)
+                window.orderOut(nil)
+                window.close()
                 self.window = nil
+                self.isDismissingLauncher = false
                 if self.settingsWindow?.isVisible == true {
                     return
                 }
