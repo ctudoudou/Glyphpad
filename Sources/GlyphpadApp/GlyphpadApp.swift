@@ -9,6 +9,12 @@ import UniformTypeIdentifiers
 
 private extension Notification.Name {
     static let glyphpadToggleSettings = Notification.Name("GlyphpadToggleSettings")
+    static let glyphpadNavigatePage = Notification.Name("GlyphpadNavigatePage")
+}
+
+private enum PageNavigationDirection: String {
+    case previous
+    case next
 }
 
 private enum PerformanceLog {
@@ -98,6 +104,9 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         let windowFrame = screenFrame.insetBy(dx: -2, dy: -2)
         let window = LauncherWindow(contentRect: windowFrame)
         window.dismissHandler = { [weak self] in self?.dismissLauncher() }
+        window.shouldHandlePageNavigation = { [weak settingsController] in
+            settingsController?.settings.navigationMode == .horizontalPages
+        }
 
         let rootView = LauncherView(settingsController: settingsController) { [weak self] in
             self?.dismissLauncher()
@@ -374,6 +383,7 @@ private final class GlobalHotKeyManager {
 
 private final class LauncherWindow: NSWindow {
     var dismissHandler: (() -> Void)?
+    var shouldHandlePageNavigation: (() -> Bool)?
 
     init(contentRect: NSRect) {
         super.init(
@@ -397,6 +407,14 @@ private final class LauncherWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, handlePageNavigation(event) {
+            return
+        }
+
+        super.sendEvent(event)
+    }
+
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 {
             dismissHandler?()
@@ -410,6 +428,32 @@ private final class LauncherWindow: NSWindow {
         }
 
         super.keyDown(with: event)
+    }
+
+    private func handlePageNavigation(_ event: NSEvent) -> Bool {
+        guard shouldHandlePageNavigation?() == true else {
+            return false
+        }
+        guard event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty else {
+            return false
+        }
+
+        let direction: PageNavigationDirection
+        switch event.keyCode {
+        case 123:
+            direction = .previous
+        case 124:
+            direction = .next
+        default:
+            return false
+        }
+
+        NotificationCenter.default.post(
+            name: .glyphpadNavigatePage,
+            object: self,
+            userInfo: ["direction": direction.rawValue]
+        )
+        return true
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -1600,6 +1644,10 @@ private struct PagedLauncherGrid: View {
         }
     }
 
+    private var pageCount: Int {
+        max(1, pages.count)
+    }
+
     private var columns: [GridItem] {
         Array(
             repeating: GridItem(.fixed(settings.tileWidth), spacing: settings.horizontalSpacing, alignment: .top),
@@ -1647,6 +1695,30 @@ private struct PagedLauncherGrid: View {
         .animation(.smooth(duration: 0.38, extraBounce: 0.16), value: currentPageID)
         .frame(width: maxGridWidth, height: maxGridHeight)
         .clipped()
+        .onAppear {
+            currentPageID = min(currentPageID ?? 0, pageCount - 1)
+        }
+        .onChange(of: pageCount) { _, newPageCount in
+            currentPageID = min(currentPageID ?? 0, max(0, newPageCount - 1))
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .glyphpadNavigatePage)) { notification in
+            guard let rawDirection = notification.userInfo?["direction"] as? String,
+                  let direction = PageNavigationDirection(rawValue: rawDirection) else {
+                return
+            }
+
+            movePage(direction)
+        }
+    }
+
+    private func movePage(_ direction: PageNavigationDirection) {
+        let currentPage = min(currentPageID ?? 0, pageCount - 1)
+        switch direction {
+        case .previous:
+            currentPageID = max(0, currentPage - 1)
+        case .next:
+            currentPageID = min(pageCount - 1, currentPage + 1)
+        }
     }
 }
 
