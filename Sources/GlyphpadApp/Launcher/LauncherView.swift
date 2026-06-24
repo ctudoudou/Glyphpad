@@ -75,6 +75,9 @@ struct LauncherView: View {
                             library.launch(app)
                             dismiss()
                         },
+                        activeDragItemID: dragState?.item.id,
+                        onInternalDragChanged: updateInternalDrag,
+                        onInternalDragEnded: finishInternalDrag,
                         close: {
                             openFolder = nil
                         }
@@ -202,11 +205,26 @@ struct LauncherView: View {
         }
     }
 
-    private func updateInternalDrag(item: LauncherItem, settings: LauncherSettings, location: CGPoint) {
-        dragState = LauncherInternalDragState(item: item, settings: settings, location: location)
+    private func updateInternalDrag(
+        item: LauncherItem,
+        settings: LauncherSettings,
+        location: CGPoint,
+        sourceFolderID: UUID?
+    ) {
+        dragState = LauncherInternalDragState(
+            item: item,
+            settings: settings,
+            location: location,
+            sourceFolderID: sourceFolderID
+        )
     }
 
-    private func finishInternalDrag(item: LauncherItem, settings: LauncherSettings, location: CGPoint) {
+    private func finishInternalDrag(
+        item: LauncherItem,
+        settings: LauncherSettings,
+        location: CGPoint,
+        sourceFolderID: UUID?
+    ) {
         defer {
             withAnimation(.easeOut(duration: 0.12)) {
                 dragState = nil
@@ -214,6 +232,14 @@ struct LauncherView: View {
         }
 
         guard let target = dragTarget(at: location), target.item.id != item.id else {
+            if let sourceFolderID, item.isApp {
+                withAnimation(.easeOut(duration: 0.16)) {
+                    _ = library.moveAppOutOfFolder(
+                        draggedItemID: item.id,
+                        sourceFolderID: sourceFolderID
+                    )
+                }
+            }
             return
         }
 
@@ -229,8 +255,9 @@ struct LauncherView: View {
         withAnimation(.easeOut(duration: 0.16)) {
             _ = library.handleInternalDrop(
                 draggedItemID: item.id,
+                sourceFolderID: sourceFolderID,
                 targetItemID: target.item.id,
-                shouldCreateFolder: shouldCreateFolder,
+                shouldCreateFolder: sourceFolderID == nil && shouldCreateFolder,
                 placement: placement
             )
         }

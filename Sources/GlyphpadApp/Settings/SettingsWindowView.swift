@@ -824,6 +824,9 @@ struct FolderOverlay: View {
     let settings: LauncherSettings
     let rename: (String) -> Void
     let launch: (InstalledApplication) -> Void
+    let activeDragItemID: String?
+    let onInternalDragChanged: (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void
+    let onInternalDragEnded: (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void
     let close: () -> Void
 
     @State private var draftName: String
@@ -834,6 +837,9 @@ struct FolderOverlay: View {
         settings: LauncherSettings,
         rename: @escaping (String) -> Void,
         launch: @escaping (InstalledApplication) -> Void,
+        activeDragItemID: String?,
+        onInternalDragChanged: @escaping (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void,
+        onInternalDragEnded: @escaping (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void,
         close: @escaping () -> Void
     ) {
         self.folder = folder
@@ -841,6 +847,9 @@ struct FolderOverlay: View {
         self.settings = settings
         self.rename = rename
         self.launch = launch
+        self.activeDragItemID = activeDragItemID
+        self.onInternalDragChanged = onInternalDragChanged
+        self.onInternalDragEnded = onInternalDragEnded
         self.close = close
         _draftName = State(initialValue: folder.name)
     }
@@ -871,9 +880,15 @@ struct FolderOverlay: View {
 
                 LazyVGrid(columns: columns, spacing: settings.verticalSpacing) {
                     ForEach(apps) { app in
-                        AppTile(app: app, settings: settings) {
-                            launch(app)
-                        }
+                        FolderAppDragTile(
+                            folder: folder,
+                            app: app,
+                            settings: settings,
+                            activeDragItemID: activeDragItemID,
+                            launch: launch,
+                            onInternalDragChanged: onInternalDragChanged,
+                            onInternalDragEnded: onInternalDragEnded
+                        )
                     }
                 }
                 .padding(.horizontal, 28)
@@ -886,6 +901,40 @@ struct FolderOverlay: View {
             }
             .shadow(color: .black.opacity(0.36), radius: 28, x: 0, y: 16)
         }
+    }
+}
+
+struct FolderAppDragTile: View {
+    let folder: FolderRecord
+    let app: InstalledApplication
+    let settings: LauncherSettings
+    let activeDragItemID: String?
+    let launch: (InstalledApplication) -> Void
+    let onInternalDragChanged: (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void
+    let onInternalDragEnded: (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void
+
+    private var item: LauncherItem {
+        .app(app)
+    }
+
+    var body: some View {
+        AppTile(app: app, settings: settings) {
+            launch(app)
+        }
+        .opacity(activeDragItemID == item.id ? 0.42 : 1)
+        .scaleEffect(activeDragItemID == item.id ? 0.94 : 1)
+        .highPriorityGesture(internalDragGesture)
+        .animation(.easeOut(duration: 0.12), value: activeDragItemID)
+    }
+
+    private var internalDragGesture: some Gesture {
+        DragGesture(minimumDistance: 4, coordinateSpace: .named("launcher-drag-space"))
+            .onChanged { value in
+                onInternalDragChanged(item, settings, value.location, folder.id)
+            }
+            .onEnded { value in
+                onInternalDragEnded(item, settings, value.location, folder.id)
+            }
     }
 }
 

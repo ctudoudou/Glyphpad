@@ -6,6 +6,7 @@ struct LauncherInternalDragState: Equatable {
     let item: LauncherItem
     let settings: LauncherSettings
     let location: CGPoint
+    let sourceFolderID: UUID?
 }
 
 struct LauncherItemFramePreferenceKey: PreferenceKey {
@@ -27,8 +28,8 @@ struct PagedLauncherGrid: View {
     let launch: (InstalledApplication) -> Void
     @Binding var currentPageID: Int?
     let activeDragItemID: String?
-    let onInternalDragChanged: (LauncherItem, LauncherSettings, CGPoint) -> Void
-    let onInternalDragEnded: (LauncherItem, LauncherSettings, CGPoint) -> Void
+    let onInternalDragChanged: (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void
+    let onInternalDragEnded: (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void
 
     private var pageSize: Int {
         settings.clampedColumns * settings.clampedRows
@@ -128,8 +129,8 @@ struct LauncherItemTile: View {
     let openFolder: (FolderRecord) -> Void
     let launch: (InstalledApplication) -> Void
     let activeDragItemID: String?
-    let onInternalDragChanged: (LauncherItem, LauncherSettings, CGPoint) -> Void
-    let onInternalDragEnded: (LauncherItem, LauncherSettings, CGPoint) -> Void
+    let onInternalDragChanged: (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void
+    let onInternalDragEnded: (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void
 
     var body: some View {
         tile
@@ -151,10 +152,10 @@ struct LauncherItemTile: View {
     private var internalDragGesture: some Gesture {
         DragGesture(minimumDistance: 4, coordinateSpace: .named("launcher-drag-space"))
             .onChanged { value in
-                onInternalDragChanged(item, settings, value.location)
+                onInternalDragChanged(item, settings, value.location, nil)
             }
             .onEnded { value in
-                onInternalDragEnded(item, settings, value.location)
+                onInternalDragEnded(item, settings, value.location, nil)
             }
     }
 

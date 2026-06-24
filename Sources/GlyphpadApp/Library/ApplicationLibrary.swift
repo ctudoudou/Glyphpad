@@ -109,12 +109,23 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
 
     func handleInternalDrop(
         draggedItemID: String,
+        sourceFolderID: UUID?,
         targetItemID: String,
         shouldCreateFolder: Bool,
         placement: LauncherDropPlacement
     ) -> Bool {
         guard draggedItemID != targetItemID else {
             return false
+        }
+
+        if let sourceFolderID,
+           let draggedAppID = Self.appID(from: draggedItemID) {
+            return moveAppOutOfFolder(
+                appID: draggedAppID,
+                sourceFolderID: sourceFolderID,
+                targetItemID: targetItemID,
+                placement: placement
+            )
         }
 
         if let targetFolderID = Self.folderID(from: targetItemID),
@@ -138,6 +149,19 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         case .after:
             return moveItem(draggedItemID: draggedItemID, to: targetIndex + 1)
         }
+    }
+
+    func moveAppOutOfFolder(draggedItemID: String, sourceFolderID: UUID) -> Bool {
+        guard let draggedAppID = Self.appID(from: draggedItemID) else {
+            return false
+        }
+
+        return moveAppOutOfFolderToTopLevel(
+            appID: draggedAppID,
+            sourceFolderID: sourceFolderID,
+            targetItemID: nil,
+            placement: .after
+        )
     }
 
     func createFolder(sourceAppID: String, targetAppID: String) -> FolderRecord? {
@@ -208,6 +232,110 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
             return true
         } catch {
             NSLog("Failed to add app to folder: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func moveAppOutOfFolder(
+        appID: String,
+        sourceFolderID: UUID,
+        targetItemID: String,
+        placement: LauncherDropPlacement
+    ) -> Bool {
+        guard folderRepository != nil else {
+            return false
+        }
+        guard appIndex[appID] != nil else {
+            return false
+        }
+        guard let sourceFolder = folder(id: sourceFolderID),
+              sourceFolder.appBundleIdentifiers.contains(appID) else {
+            return false
+        }
+
+        if let targetFolderID = Self.folderID(from: targetItemID) {
+            guard targetFolderID != sourceFolderID,
+                  let targetFolder = folder(id: targetFolderID),
+                  !targetFolder.appBundleIdentifiers.contains(appID) else {
+                return false
+            }
+
+            do {
+                try folderRepository?.updateMembers(
+                    folderID: sourceFolderID,
+                    appBundleIdentifiers: sourceFolder.appBundleIdentifiers.filter { $0 != appID }
+                )
+                try folderRepository?.updateMembers(
+                    folderID: targetFolderID,
+                    appBundleIdentifiers: targetFolder.appBundleIdentifiers + [appID]
+                )
+                loadFolders()
+                rebuildLauncherItems()
+                saveCurrentLayout()
+                return true
+            } catch {
+                NSLog("Failed to move app between folders: \(error.localizedDescription)")
+                return false
+            }
+        }
+
+        guard launcherItems.contains(where: { $0.id == targetItemID }) else {
+            return false
+        }
+
+        return moveAppOutOfFolderToTopLevel(
+            appID: appID,
+            sourceFolderID: sourceFolderID,
+            targetItemID: targetItemID,
+            placement: placement
+        )
+    }
+
+    private func moveAppOutOfFolderToTopLevel(
+        appID: String,
+        sourceFolderID: UUID,
+        targetItemID: String?,
+        placement: LauncherDropPlacement
+    ) -> Bool {
+        guard folderRepository != nil else {
+            return false
+        }
+        guard appIndex[appID] != nil else {
+            return false
+        }
+        guard let sourceFolder = folder(id: sourceFolderID),
+              sourceFolder.appBundleIdentifiers.contains(appID) else {
+            return false
+        }
+
+        do {
+            try folderRepository?.updateMembers(
+                folderID: sourceFolderID,
+                appBundleIdentifiers: sourceFolder.appBundleIdentifiers.filter { $0 != appID }
+            )
+            loadFolders()
+            rebuildLauncherItems()
+
+            let fallbackTargetID = Self.layoutID(kind: .folder, targetIdentifier: sourceFolderID.uuidString)
+            guard let targetIndex = launcherItems.firstIndex(where: { $0.id == (targetItemID ?? fallbackTargetID) }) else {
+                saveCurrentLayout()
+                return true
+            }
+
+            let insertIndex: Int
+            switch placement {
+            case .before:
+                insertIndex = targetIndex
+            case .after:
+                insertIndex = targetIndex + 1
+            }
+
+            return moveItem(
+                draggedItemID: Self.layoutID(kind: .app, targetIdentifier: appID),
+                to: insertIndex
+            )
+        } catch {
+            NSLog("Failed to move app out of folder: \(error.localizedDescription)")
             return false
         }
     }
