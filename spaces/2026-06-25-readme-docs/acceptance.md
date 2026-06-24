@@ -6,6 +6,7 @@
 - README screenshot asset exists and renders as a valid PNG.
 - Documentation does not claim unfinished LLM classification as complete.
 - README highlights the app's roughly 3 MB local bundle size.
+- README intro and feature copy use a conversational product-sales tone.
 - Validation commands pass.
 
 ## Verification
@@ -14,3 +15,4 @@
 - 2026-06-25: `du -sh dist/Glyphpad.app .build/debug/GlyphpadApp` reported 2.8M for both paths.
 - 2026-06-25: `swift test` passed.
 - 2026-06-25: `xcodebuild -scheme GlyphpadApp -destination 'platform=macOS' build` passed.
+- 2026-06-25: `git diff --check` passed after the conversational README rewrite.

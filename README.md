@@ -2,32 +2,29 @@
 
 [中文说明](README.zh-CN.md)
 
-Glyphpad brings the classic Launchpad feeling back to modern macOS: a fast full-screen app grid, instant search, familiar folders, page navigation, and drag organization without turning the launcher into a dashboard.
+Glyphpad is the Launchpad replacement I wanted on macOS: open it, type a few letters, launch the app, and get out of the way.
 
-It is intentionally small, native, and local-first. The current local app bundle is only about **3 MB**, and discovered apps, launcher layout, folders, settings, and classification data live in SQLite under the user's Application Support directory.
+It feels familiar on purpose. Full-screen grid, search, folders, pages, drag sorting, keyboard shortcuts, custom background, and a separate settings window. No web wrapper. No bloated control center. The current local app bundle is only about **3 MB**.
 
-Configuration stays out of the way in a separate settings window, where Glyphpad can grow into automatic and LLM-assisted app organization without making the launcher itself feel heavy.
+Everything important stays local in SQLite, including your app list, layout, folders, settings, and future classification history. LLM-assisted organization is planned as a helper, not something that takes over your Mac.
 
 ## Screenshot
 
 ![Glyphpad launcher](docs/screenshots/launcher.png)
 
-## Features
+## Why Glyphpad
 
-- A tiny native app bundle, currently only about **3 MB**.
-- Full-screen Launchpad-style app grid with a soft blurred backdrop.
-- Search is focused on launch, so you can type first and think later.
-- Native app discovery from standard macOS application directories.
-- Manual app organization with persistent drag sorting.
-- Folders that behave like folders: rename, group apps, drag in, drag out, and let empty folders disappear.
-- Vertical scroll when you want a flowing list, horizontal pages when you want the classic Launchpad rhythm.
-- Page dots that stay in sync with horizontal navigation.
-- Tunable density: rows, columns, icon size, and auto-arrange behavior.
-- Custom background image and blur strength.
-- A separate settings window for layout, appearance, hot key, and API configuration.
-- A custom global hot key to summon or dismiss Glyphpad quickly.
-- SQLite-backed local persistence for apps, folders, layout, and settings.
-- OpenAI-compatible API settings are present as the configuration surface for future automatic classification workflows.
+- **Only about 3 MB**: small enough to feel like a utility, not a platform.
+- **Feels like Launchpad**: full-screen app grid, soft blurred background, search, folders, pages, and page dots.
+- **Fast to use**: open it and start typing. The search field is already focused.
+- **Your layout stays yours**: drag apps around, create folders, move apps in and out, and Glyphpad remembers the order.
+- **Folders clean themselves up**: empty folders disappear automatically.
+- **Use it your way**: vertical scrolling for a long app list, or horizontal pages for the classic Launchpad feel.
+- **Make it yours**: choose a background image, tune blur, set rows, columns, icon size, and auto-arrange behavior.
+- **Settings stay separate**: the launcher stays clean; layout, appearance, hot key, and API settings live in their own window.
+- **Keyboard friendly**: use the default global hot key or record your own.
+- **Local-first**: app metadata, folders, layout, settings, and future classification data are stored in SQLite on your Mac.
+- **Ready for smarter organization**: OpenAI-compatible API settings are already in place for future automatic classification workflows.
 
 ## Requirements
 
@@ -76,15 +73,13 @@ Glyphpad runs as an accessory-style app and does not keep a Dock icon visible wh
 
 ## Usage
 
-1. Launch Glyphpad. The full-screen app grid opens immediately.
-2. Type in the search field to filter apps and folders.
-3. Click an app icon to launch it.
-4. Click empty launcher space or press `Escape` to close the launcher.
-5. Drag apps to reorder them.
-6. Drag one app onto another app to create a folder.
-7. Drag apps onto an existing folder to add them.
-8. Open a folder, edit its title, or drag apps out to return them to the top-level grid.
-9. Open Settings with `Command + ,` to adjust layout, navigation, appearance, API settings, and the global hot key.
+1. Open Glyphpad and the launcher appears full screen.
+2. Type to search, then click an app to launch it.
+3. Press `Escape` or click empty space when you are done.
+4. Drag apps to reorder them.
+5. Drag one app onto another to make a folder.
+6. Drag apps into a folder, or drag them back out when you change your mind.
+7. Open Settings with `Command + ,` to tune layout, pages, background, API settings, and the global hot key.
 
 ## Keyboard Shortcuts
 
@@ -99,7 +94,7 @@ Glyphpad runs as an accessory-style app and does not keep a Dock icon visible wh
 
 ## Settings
 
-Glyphpad keeps launcher configuration out of the full-screen launcher surface. Settings are available in a separate window:
+Glyphpad keeps the launcher clean. All the knobs live in a separate Settings window:
 
 - **Layout**: auto-arrange, columns, rows, icon size, vertical scrolling, and horizontal pages.
 - **Keyboard**: record a custom global hot key and reset it to the default.
