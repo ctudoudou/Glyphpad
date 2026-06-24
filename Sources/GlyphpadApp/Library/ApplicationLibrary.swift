@@ -222,10 +222,7 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         }
 
         do {
-            try folderRepository?.updateMembers(
-                folderID: folderID,
-                appBundleIdentifiers: folder.appBundleIdentifiers + [appID]
-            )
+            try writeFolderMembers(folderID: folderID, appBundleIdentifiers: folder.appBundleIdentifiers + [appID])
             loadFolders()
             rebuildLauncherItems()
             saveCurrentLayout()
@@ -261,11 +258,11 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
             }
 
             do {
-                try folderRepository?.updateMembers(
+                try writeFolderMembers(
                     folderID: sourceFolderID,
                     appBundleIdentifiers: sourceFolder.appBundleIdentifiers.filter { $0 != appID }
                 )
-                try folderRepository?.updateMembers(
+                try writeFolderMembers(
                     folderID: targetFolderID,
                     appBundleIdentifiers: targetFolder.appBundleIdentifiers + [appID]
                 )
@@ -309,7 +306,7 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         }
 
         do {
-            try folderRepository?.updateMembers(
+            try writeFolderMembers(
                 folderID: sourceFolderID,
                 appBundleIdentifiers: sourceFolder.appBundleIdentifiers.filter { $0 != appID }
             )
@@ -337,6 +334,17 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         } catch {
             NSLog("Failed to move app out of folder: \(error.localizedDescription)")
             return false
+        }
+    }
+
+    private func writeFolderMembers(folderID: UUID, appBundleIdentifiers: [String]) throws {
+        if appBundleIdentifiers.isEmpty {
+            try folderRepository?.delete(folderID: folderID)
+        } else {
+            try folderRepository?.updateMembers(
+                folderID: folderID,
+                appBundleIdentifiers: appBundleIdentifiers
+            )
         }
     }
 

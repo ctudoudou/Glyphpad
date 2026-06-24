@@ -61,6 +61,19 @@ final class SQLiteFolderRepositoryTests: XCTestCase {
         XCTAssertEqual(try repository.fetchAll()[0].appBundleIdentifiers, ["com.example.calendar", "com.example.mail"])
     }
 
+    func testDeleteRemovesFolder() throws {
+        let repository = try makeStore().folderRepository()
+        let folder = try repository.create(
+            name: "Temporary",
+            appBundleIdentifiers: ["com.example.one", "com.example.two"],
+            positionIndex: 0
+        )
+
+        try repository.delete(folderID: folder.id)
+
+        XCTAssertTrue(try repository.fetchAll().isEmpty)
+    }
+
     private func makeStore() throws -> GlyphpadStore {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

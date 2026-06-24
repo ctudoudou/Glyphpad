@@ -123,6 +123,18 @@ public final class SQLiteFolderRepository: FolderRepository, @unchecked Sendable
         }
     }
 
+    public func delete(folderID: UUID) throws {
+        let statement = try database.prepare(
+            """
+            DELETE FROM folders
+            WHERE id = ?;
+            """
+        )
+
+        try statement.bind(folderID.uuidString, at: 1)
+        _ = try statement.step()
+    }
+
     private func fetchMembers(folderID: UUID) throws -> [String] {
         let statement = try database.prepare(
             """
