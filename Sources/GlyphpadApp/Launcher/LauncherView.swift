@@ -71,7 +71,9 @@ struct LauncherView: View {
                         settings: settingsController.settings.fitting(maxSize: proxy.size),
                         rename: { name in
                             library.rename(folder: folder, name: name)
-                            openFolder = library.folder(id: folder.id)
+                            if openFolder?.id == folder.id {
+                                openFolder = library.folder(id: folder.id)
+                            }
                         },
                         launch: { app in
                             library.launch(app)
