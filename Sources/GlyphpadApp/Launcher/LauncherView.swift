@@ -13,6 +13,7 @@ struct LauncherView: View {
     @State private var currentPageID: Int? = 0
     @State private var launcherItemFrames: [String: CGRect] = [:]
     @State private var dragState: LauncherInternalDragState?
+    @State private var suppressFolderOpen = false
 
     private var filteredItems: [LauncherItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -61,6 +62,7 @@ struct LauncherView: View {
                 .scaleEffect(isContentPresented ? 1 : 1.018)
                 .blur(radius: isContentPresented ? 0 : 2)
                 .compositingGroup()
+                .allowsHitTesting(openFolder == nil && !suppressFolderOpen)
 
                 if let folder = openFolder {
                     FolderOverlay(
@@ -69,7 +71,9 @@ struct LauncherView: View {
                         settings: settingsController.settings.fitting(maxSize: proxy.size),
                         rename: { name in
                             library.rename(folder: folder, name: name)
-                            openFolder = library.folder(id: folder.id)
+                            if openFolder?.id == folder.id {
+                                openFolder = library.folder(id: folder.id)
+                            }
                         },
                         launch: { app in
                             library.launch(app)
@@ -78,10 +82,9 @@ struct LauncherView: View {
                         activeDragItemID: dragState?.item.id,
                         onInternalDragChanged: updateInternalDrag,
                         onInternalDragEnded: finishInternalDrag,
-                        close: {
-                            openFolder = nil
-                        }
+                        close: closeOpenFolder
                     )
+                    .zIndex(10)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
 
@@ -167,7 +170,7 @@ struct LauncherView: View {
                                     item: item,
                                     settings: settings,
                                     library: library,
-                                    openFolder: { folder in self.openFolder = folder },
+                                    openFolder: openLauncherFolder,
                                     launch: { app in
                                         library.launch(app)
                                         dismiss()
@@ -190,7 +193,7 @@ struct LauncherView: View {
                     maxGridWidth: maxGridWidth,
                     maxGridHeight: maxGridHeight,
                     library: library,
-                    openFolder: { folder in self.openFolder = folder },
+                    openFolder: openLauncherFolder,
                     dismiss: dismiss,
                     launch: { app in
                         library.launch(app)
@@ -294,6 +297,22 @@ struct LauncherView: View {
 
     private func dismiss() {
         onDismiss()
+    }
+
+    private func openLauncherFolder(_ folder: FolderRecord) {
+        guard !suppressFolderOpen else {
+            return
+        }
+
+        openFolder = folder
+    }
+
+    private func closeOpenFolder() {
+        openFolder = nil
+        suppressFolderOpen = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
+            suppressFolderOpen = false
+        }
     }
 
     @ViewBuilder
