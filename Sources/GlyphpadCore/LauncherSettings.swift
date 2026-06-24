@@ -6,6 +6,18 @@ public enum LauncherNavigationMode: String, CaseIterable, Equatable, Sendable {
     case horizontalPages
 }
 
+public struct LauncherHotKey: Equatable, Sendable {
+    public var keyCode: Int
+    public var carbonModifiers: UInt32
+
+    public init(keyCode: Int, carbonModifiers: UInt32) {
+        self.keyCode = keyCode
+        self.carbonModifiers = carbonModifiers
+    }
+
+    public static let `default` = LauncherHotKey(keyCode: 49, carbonModifiers: 2_048)
+}
+
 public struct LauncherSettings: Equatable, Sendable {
     public var columns: Int
     public var rows: Int
@@ -16,6 +28,7 @@ public struct LauncherSettings: Equatable, Sendable {
     public var backgroundBlurRadius: CGFloat
     public var apiEndpoint: String?
     public var apiKey: String?
+    public var showHotKey: LauncherHotKey
 
     public init(
         columns: Int,
@@ -26,7 +39,8 @@ public struct LauncherSettings: Equatable, Sendable {
         backgroundImagePath: String? = nil,
         backgroundBlurRadius: CGFloat = 18,
         apiEndpoint: String? = nil,
-        apiKey: String? = nil
+        apiKey: String? = nil,
+        showHotKey: LauncherHotKey = .default
     ) {
         self.columns = columns
         self.rows = rows
@@ -37,6 +51,7 @@ public struct LauncherSettings: Equatable, Sendable {
         self.backgroundBlurRadius = backgroundBlurRadius
         self.apiEndpoint = apiEndpoint
         self.apiKey = apiKey
+        self.showHotKey = showHotKey
     }
 
     public static let `default` = LauncherSettings(
@@ -48,7 +63,8 @@ public struct LauncherSettings: Equatable, Sendable {
         backgroundImagePath: nil,
         backgroundBlurRadius: 18,
         apiEndpoint: nil,
-        apiKey: nil
+        apiKey: nil,
+        showHotKey: .default
     )
 
     public var clampedColumns: Int {
@@ -105,7 +121,8 @@ public struct LauncherSettings: Equatable, Sendable {
             backgroundImagePath: normalized(backgroundImagePath),
             backgroundBlurRadius: clampedBackgroundBlurRadius,
             apiEndpoint: normalized(apiEndpoint),
-            apiKey: normalized(apiKey)
+            apiKey: normalized(apiKey),
+            showHotKey: normalized(showHotKey)
         )
     }
 
@@ -119,8 +136,17 @@ public struct LauncherSettings: Equatable, Sendable {
             backgroundImagePath: normalized(backgroundImagePath),
             backgroundBlurRadius: clampedBackgroundBlurRadius,
             apiEndpoint: normalized(apiEndpoint),
-            apiKey: normalized(apiKey)
+            apiKey: normalized(apiKey),
+            showHotKey: normalized(showHotKey)
         )
+    }
+
+    private func normalized(_ hotKey: LauncherHotKey) -> LauncherHotKey {
+        guard hotKey.keyCode >= 0, hotKey.carbonModifiers != 0 else {
+            return .default
+        }
+
+        return hotKey
     }
 
     private func normalized(_ value: String?) -> String? {

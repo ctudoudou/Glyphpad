@@ -21,7 +21,9 @@ public final class SQLiteLauncherSettingsRepository: LauncherSettingsRepository,
                 background_image_path,
                 background_blur_radius,
                 api_endpoint,
-                api_key
+                api_key,
+                show_hot_key_code,
+                show_hot_key_modifiers
             FROM launcher_settings
             WHERE id = 'default'
             LIMIT 1;
@@ -43,7 +45,11 @@ public final class SQLiteLauncherSettingsRepository: LauncherSettingsRepository,
             backgroundImagePath: statement.optionalString(at: 5),
             backgroundBlurRadius: CGFloat(statement.double(at: 6)),
             apiEndpoint: statement.optionalString(at: 7),
-            apiKey: statement.optionalString(at: 8)
+            apiKey: statement.optionalString(at: 8),
+            showHotKey: LauncherHotKey(
+                keyCode: statement.int(at: 9),
+                carbonModifiers: UInt32(max(0, statement.int(at: 10)))
+            )
         ).clamped()
     }
 
@@ -62,9 +68,11 @@ public final class SQLiteLauncherSettingsRepository: LauncherSettingsRepository,
                 background_blur_radius,
                 api_endpoint,
                 api_key,
+                show_hot_key_code,
+                show_hot_key_modifiers,
                 updated_at
             )
-            VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 columns = excluded.columns,
                 rows = excluded.rows,
@@ -75,6 +83,8 @@ public final class SQLiteLauncherSettingsRepository: LauncherSettingsRepository,
                 background_blur_radius = excluded.background_blur_radius,
                 api_endpoint = excluded.api_endpoint,
                 api_key = excluded.api_key,
+                show_hot_key_code = excluded.show_hot_key_code,
+                show_hot_key_modifiers = excluded.show_hot_key_modifiers,
                 updated_at = excluded.updated_at;
             """
         )
@@ -88,7 +98,9 @@ public final class SQLiteLauncherSettingsRepository: LauncherSettingsRepository,
         try statement.bind(Double(clamped.backgroundBlurRadius), at: 7)
         try statement.bind(clamped.apiEndpoint, at: 8)
         try statement.bind(clamped.apiKey, at: 9)
-        try statement.bind(dateFormatter.string(from: Date()), at: 10)
+        try statement.bind(clamped.showHotKey.keyCode, at: 10)
+        try statement.bind(Int(clamped.showHotKey.carbonModifiers), at: 11)
+        try statement.bind(dateFormatter.string(from: Date()), at: 12)
         _ = try statement.step()
     }
 }

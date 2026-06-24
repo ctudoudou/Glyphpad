@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import Combine
 import Darwin
 import GlyphpadCore
 import GlyphpadStorage
@@ -52,6 +53,7 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
     private var settingsWindow: NSWindow?
     private let settingsController = LauncherSettingsController()
     private var hotKeyManager: GlobalHotKeyManager?
+    private var settingsCancellable: AnyCancellable?
     private var isDismissingLauncher = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -223,7 +225,14 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
                 self?.toggleLauncher()
             }
         }
-        hotKeyManager?.registerDefaultHotKey()
+        hotKeyManager?.register(settingsController.settings.showHotKey)
+        settingsCancellable = settingsController.$settings
+            .map(\.showHotKey)
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] hotKey in
+                self?.hotKeyManager?.register(hotKey)
+            }
     }
 
     private func installMenu() {
@@ -257,6 +266,8 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
 private final class GlobalHotKeyManager {
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
+    private var activeHotKeyID: UInt32 = 0
+    private var nextHotKeyID: UInt32 = 1
     private let action: @Sendable () -> Void
 
     init(action: @escaping @Sendable () -> Void) {
@@ -272,7 +283,42 @@ private final class GlobalHotKeyManager {
         }
     }
 
-    func registerDefaultHotKey() {
+    func register(_ hotKey: LauncherHotKey) {
+        guard installHandlerIfNeeded() else {
+            return
+        }
+
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: nextHotKeyID)
+        var newHotKeyRef: EventHotKeyRef?
+        let registerStatus = RegisterEventHotKey(
+            UInt32(hotKey.keyCode),
+            hotKey.carbonModifiers,
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &newHotKeyRef
+        )
+        if registerStatus != noErr {
+            NSLog("Failed to register Glyphpad global hot key: \(registerStatus) keyCode=\(hotKey.keyCode) modifiers=\(hotKey.carbonModifiers)")
+            return
+        }
+
+        if let hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+        }
+        hotKeyRef = newHotKeyRef
+        activeHotKeyID = hotKeyID.id
+        nextHotKeyID = nextHotKeyID == UInt32.max ? 1 : nextHotKeyID + 1
+        if nextHotKeyID == activeHotKeyID {
+            nextHotKeyID = nextHotKeyID == UInt32.max ? 1 : nextHotKeyID + 1
+        }
+    }
+
+    private func installHandlerIfNeeded() -> Bool {
+        if eventHandlerRef != nil {
+            return true
+        }
+
         let eventType = EventTypeSpec(
             eventClass: OSType(kEventClassKeyboard),
             eventKind: UInt32(kEventHotKeyPressed)
@@ -296,11 +342,11 @@ private final class GlobalHotKeyManager {
                     nil,
                     &hotKeyID
                 )
-                guard result == noErr, hotKeyID.id == 1 else {
+                let manager = Unmanaged<GlobalHotKeyManager>.fromOpaque(userData).takeUnretainedValue()
+                guard result == noErr, hotKeyID.id == manager.activeHotKeyID else {
                     return noErr
                 }
 
-                let manager = Unmanaged<GlobalHotKeyManager>.fromOpaque(userData).takeUnretainedValue()
                 manager.action()
                 return noErr
             },
@@ -311,21 +357,10 @@ private final class GlobalHotKeyManager {
         )
         guard installStatus == noErr else {
             NSLog("Failed to install Glyphpad hot key handler: \(installStatus)")
-            return
+            return false
         }
 
-        let hotKeyID = EventHotKeyID(signature: Self.signature, id: 1)
-        let registerStatus = RegisterEventHotKey(
-            UInt32(kVK_Space),
-            UInt32(optionKey),
-            hotKeyID,
-            GetApplicationEventTarget(),
-            0,
-            &hotKeyRef
-        )
-        if registerStatus != noErr {
-            NSLog("Failed to register Glyphpad global hot key: \(registerStatus)")
-        }
+        return true
     }
 
     private static let signature: OSType = {
@@ -648,6 +683,7 @@ private enum AppStoreFactory {
 private struct SettingsWindowView: View {
     @ObservedObject var controller: LauncherSettingsController
     @State private var selectedSection: SettingsSection = .layout
+    @State private var isRecordingHotKey = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -818,14 +854,48 @@ private struct SettingsWindowView: View {
                 HStack(spacing: 16) {
                     SettingFieldLabel(
                         title: "Show or hide launcher",
-                        detail: "Glyphpad stays in the background after closing the launcher."
+                        detail: isRecordingHotKey ? "Press a shortcut. Escape cancels." : "Glyphpad stays in the background after closing the launcher."
                     )
                     Spacer()
-                    HStack(spacing: 5) {
-                        KeyCap("Option")
-                        KeyCap("Space")
+
+                    VStack(alignment: .trailing, spacing: 10) {
+                        HStack(spacing: 5) {
+                            ForEach(HotKeyFormatter.components(for: controller.settings.showHotKey), id: \.self) { component in
+                                KeyCap(component)
+                            }
+                        }
+
+                        HStack(spacing: 8) {
+                            Button {
+                                isRecordingHotKey = true
+                            } label: {
+                                Label(isRecordingHotKey ? "Recording" : "Change", systemImage: "keyboard")
+                            }
+                            .disabled(isRecordingHotKey)
+
+                            Button {
+                                controller.update { $0.showHotKey = .default }
+                            } label: {
+                                Label("Reset", systemImage: "arrow.counterclockwise")
+                            }
+                            .disabled(controller.settings.showHotKey == .default)
+                        }
                     }
                 }
+                .background(
+                    HotKeyCaptureView(
+                        isRecording: isRecordingHotKey,
+                        onRecord: { hotKey in
+                            controller.update { $0.showHotKey = hotKey }
+                            isRecordingHotKey = false
+                        },
+                        onCancel: {
+                            isRecordingHotKey = false
+                        }
+                    )
+                    .frame(width: 1, height: 1)
+                    .opacity(0.01)
+                )
             }
         }
     }
@@ -1073,6 +1143,184 @@ private struct SettingFieldLabel: View {
                 .foregroundStyle(.secondary)
         }
     }
+}
+
+private struct HotKeyCaptureView: NSViewRepresentable {
+    let isRecording: Bool
+    let onRecord: (LauncherHotKey) -> Void
+    let onCancel: () -> Void
+
+    func makeNSView(context: Context) -> HotKeyCaptureNSView {
+        let view = HotKeyCaptureNSView()
+        view.onRecord = onRecord
+        view.onCancel = onCancel
+        return view
+    }
+
+    func updateNSView(_ nsView: HotKeyCaptureNSView, context: Context) {
+        nsView.isRecording = isRecording
+        nsView.onRecord = onRecord
+        nsView.onCancel = onCancel
+
+        if isRecording {
+            DispatchQueue.main.async {
+                nsView.window?.makeFirstResponder(nsView)
+            }
+        }
+    }
+}
+
+private final class HotKeyCaptureNSView: NSView {
+    var isRecording = false
+    var onRecord: ((LauncherHotKey) -> Void)?
+    var onCancel: (() -> Void)?
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        guard isRecording else {
+            super.keyDown(with: event)
+            return
+        }
+
+        if event.keyCode == 53 {
+            onCancel?()
+            return
+        }
+
+        let modifiers = HotKeyFormatter.carbonModifiers(from: event.modifierFlags)
+        guard modifiers != 0 else {
+            NSSound.beep()
+            return
+        }
+
+        onRecord?(LauncherHotKey(keyCode: Int(event.keyCode), carbonModifiers: modifiers))
+    }
+}
+
+private enum HotKeyFormatter {
+    static func components(for hotKey: LauncherHotKey) -> [String] {
+        modifierComponents(for: hotKey.carbonModifiers) + [keyName(for: hotKey.keyCode)]
+    }
+
+    static func carbonModifiers(from flags: NSEvent.ModifierFlags) -> UInt32 {
+        let normalized = flags.intersection(.deviceIndependentFlagsMask)
+        var result: UInt32 = 0
+
+        if normalized.contains(.command) {
+            result |= UInt32(cmdKey)
+        }
+        if normalized.contains(.shift) {
+            result |= UInt32(shiftKey)
+        }
+        if normalized.contains(.option) {
+            result |= UInt32(optionKey)
+        }
+        if normalized.contains(.control) {
+            result |= UInt32(controlKey)
+        }
+
+        return result
+    }
+
+    private static func modifierComponents(for carbonModifiers: UInt32) -> [String] {
+        var components: [String] = []
+
+        if carbonModifiers & UInt32(controlKey) != 0 {
+            components.append("Control")
+        }
+        if carbonModifiers & UInt32(optionKey) != 0 {
+            components.append("Option")
+        }
+        if carbonModifiers & UInt32(shiftKey) != 0 {
+            components.append("Shift")
+        }
+        if carbonModifiers & UInt32(cmdKey) != 0 {
+            components.append("Command")
+        }
+
+        return components
+    }
+
+    private static func keyName(for keyCode: Int) -> String {
+        keyNames[keyCode] ?? "Key \(keyCode)"
+    }
+
+    private static let keyNames: [Int: String] = [
+        0: "A",
+        1: "S",
+        2: "D",
+        3: "F",
+        4: "H",
+        5: "G",
+        6: "Z",
+        7: "X",
+        8: "C",
+        9: "V",
+        11: "B",
+        12: "Q",
+        13: "W",
+        14: "E",
+        15: "R",
+        16: "Y",
+        17: "T",
+        18: "1",
+        19: "2",
+        20: "3",
+        21: "4",
+        22: "6",
+        23: "5",
+        24: "=",
+        25: "9",
+        26: "7",
+        27: "-",
+        28: "8",
+        29: "0",
+        30: "]",
+        31: "O",
+        32: "U",
+        33: "[",
+        34: "I",
+        35: "P",
+        37: "L",
+        38: "J",
+        39: "'",
+        40: "K",
+        41: ";",
+        42: "\\",
+        43: ",",
+        44: "/",
+        45: "N",
+        46: "M",
+        47: ".",
+        48: "Tab",
+        49: "Space",
+        50: "`",
+        51: "Delete",
+        53: "Escape",
+        76: "Enter",
+        96: "F5",
+        97: "F6",
+        98: "F7",
+        99: "F3",
+        100: "F8",
+        101: "F9",
+        103: "F11",
+        109: "F10",
+        111: "F12",
+        115: "Home",
+        116: "Page Up",
+        117: "Forward Delete",
+        118: "F4",
+        119: "End",
+        120: "F2",
+        121: "Page Down",
+        122: "F1",
+        123: "Left",
+        124: "Right",
+        125: "Down",
+        126: "Up"
+    ]
 }
 
 private struct KeyCap: View {

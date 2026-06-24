@@ -23,7 +23,8 @@ final class SQLiteLauncherSettingsRepositoryTests: XCTestCase {
             backgroundImagePath: "/tmp/glyphpad-background.png",
             backgroundBlurRadius: 24,
             apiEndpoint: "https://api.example.test/v1",
-            apiKey: "test-key"
+            apiKey: "test-key",
+            showHotKey: LauncherHotKey(keyCode: 8, carbonModifiers: 768)
         )
 
         try repository.save(settings)
@@ -43,7 +44,8 @@ final class SQLiteLauncherSettingsRepositoryTests: XCTestCase {
             backgroundImagePath: "   ",
             backgroundBlurRadius: 300,
             apiEndpoint: "  ",
-            apiKey: " secret "
+            apiKey: " secret ",
+            showHotKey: LauncherHotKey(keyCode: -1, carbonModifiers: 0)
         )
 
         try repository.save(settings)
@@ -59,7 +61,8 @@ final class SQLiteLauncherSettingsRepositoryTests: XCTestCase {
                 backgroundImagePath: nil,
                 backgroundBlurRadius: 48,
                 apiEndpoint: nil,
-                apiKey: "secret"
+                apiKey: "secret",
+                showHotKey: .default
             )
         )
     }

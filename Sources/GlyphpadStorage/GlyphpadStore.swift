@@ -101,6 +101,8 @@ public final class GlyphpadStore: @unchecked Sendable {
                 background_blur_radius REAL NOT NULL DEFAULT 18,
                 api_endpoint TEXT,
                 api_key TEXT,
+                show_hot_key_code INTEGER NOT NULL DEFAULT 49,
+                show_hot_key_modifiers INTEGER NOT NULL DEFAULT 2048,
                 updated_at TEXT NOT NULL
             );
 
@@ -115,5 +117,7 @@ public final class GlyphpadStore: @unchecked Sendable {
         try? database.execute("ALTER TABLE launcher_settings ADD COLUMN background_blur_radius REAL NOT NULL DEFAULT 18;")
         try? database.execute("ALTER TABLE launcher_settings ADD COLUMN api_endpoint TEXT;")
         try? database.execute("ALTER TABLE launcher_settings ADD COLUMN api_key TEXT;")
+        try? database.execute("ALTER TABLE launcher_settings ADD COLUMN show_hot_key_code INTEGER NOT NULL DEFAULT 49;")
+        try? database.execute("ALTER TABLE launcher_settings ADD COLUMN show_hot_key_modifiers INTEGER NOT NULL DEFAULT 2048;")
     }
 }
