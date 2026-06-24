@@ -1748,14 +1748,16 @@ private struct LauncherItemTile: View {
 
     var body: some View {
         tile
+            .contentShape(Rectangle())
             .onDrag {
-                NSItemProvider(object: item.id as NSString)
+                LauncherDragPayload.itemProvider(for: item.id)
             }
             .onDrop(
-                of: [UTType.text],
+                of: LauncherDragPayload.contentTypes,
                 delegate: LauncherItemDropDelegate(
                     targetItemID: item.id,
-                    targetIsApp: item.isApp,
+                    targetItem: item,
+                    settings: settings,
                     library: library
                 )
             )
@@ -1781,22 +1783,46 @@ private struct LauncherItemTile: View {
 
 }
 
+private enum LauncherDragPayload {
+    static let contentTypes: [UTType] = [.plainText, .text]
+
+    static func itemProvider(for itemID: String) -> NSItemProvider {
+        let provider = NSItemProvider()
+        provider.suggestedName = itemID
+        provider.registerDataRepresentation(
+            forTypeIdentifier: UTType.plainText.identifier,
+            visibility: .all
+        ) { completion in
+            completion(itemID.data(using: .utf8), nil)
+            return nil
+        }
+        return provider
+    }
+}
+
 private struct LauncherItemDropDelegate: DropDelegate {
     let targetItemID: String
-    let targetIsApp: Bool
+    let targetItem: LauncherItem
+    let settings: LauncherSettings
     @ObservedObject var library: ApplicationLibrary
 
     func validateDrop(info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: [UTType.text])
+        info.hasItemsConforming(to: LauncherDragPayload.contentTypes)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        guard let provider = info.itemProviders(for: [UTType.text]).first else {
+        guard let provider = info.itemProviders(for: LauncherDragPayload.contentTypes).first else {
             return false
         }
 
-        provider.loadObject(ofClass: NSString.self) { object, _ in
-            guard let draggedItemID = object as? String else {
+        let shouldCreateFolder = shouldCreateFolder(at: info.location)
+        provider.loadDataRepresentation(forTypeIdentifier: UTType.plainText.identifier) { data, _ in
+            guard let data,
+                  let draggedItemID = String(data: data, encoding: .utf8) else {
                 return
             }
 
@@ -1804,11 +1830,25 @@ private struct LauncherItemDropDelegate: DropDelegate {
                 _ = library.handleDrop(
                     draggedItemID: draggedItemID,
                     targetItemID: targetItemID,
-                    shouldCreateFolder: targetIsApp
+                    shouldCreateFolder: shouldCreateFolder
                 )
             }
         }
         return true
+    }
+
+    private func shouldCreateFolder(at location: CGPoint) -> Bool {
+        guard targetItem.isApp else {
+            return false
+        }
+
+        let iconLeft = (settings.tileWidth - settings.clampedIconSize) / 2
+        let iconRight = iconLeft + settings.clampedIconSize
+        let iconBottom = settings.clampedIconSize
+        return location.x >= iconLeft
+            && location.x <= iconRight
+            && location.y >= 0
+            && location.y <= iconBottom
     }
 }
 
@@ -1849,27 +1889,25 @@ private struct AppTile: View {
     let launch: () -> Void
 
     var body: some View {
-        Button(action: launch) {
-            VStack(spacing: 9) {
-                Image(nsImage: app.icon)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: settings.clampedIconSize, height: settings.clampedIconSize)
-                    .shadow(color: .black.opacity(0.26), radius: 10, x: 0, y: 6)
+        VStack(spacing: 9) {
+            Image(nsImage: app.icon)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: settings.clampedIconSize, height: settings.clampedIconSize)
+                .shadow(color: .black.opacity(0.26), radius: 10, x: 0, y: 6)
 
-                Text(app.displayName)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .shadow(color: .black.opacity(0.45), radius: 2, x: 0, y: 1)
-                    .frame(width: settings.tileWidth, height: 34, alignment: .top)
-            }
-            .frame(width: settings.tileWidth, height: settings.tileHeight)
-            .contentShape(Rectangle())
+            Text(app.displayName)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .shadow(color: .black.opacity(0.45), radius: 2, x: 0, y: 1)
+                .frame(width: settings.tileWidth, height: 34, alignment: .top)
         }
-        .buttonStyle(.plain)
+        .frame(width: settings.tileWidth, height: settings.tileHeight)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: launch)
         .help(app.bundleIdentifier ?? app.url.path)
     }
 }
@@ -1881,40 +1919,38 @@ private struct FolderTile: View {
     let open: () -> Void
 
     var body: some View {
-        Button(action: open) {
-            VStack(spacing: 9) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .fill(.white.opacity(0.14))
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        VStack(spacing: 9) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(.white.opacity(0.14))
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
 
-                    LazyVGrid(
-                        columns: Array(repeating: GridItem(.fixed(settings.clampedIconSize * 0.28), spacing: 4), count: 2),
-                        spacing: 4
-                    ) {
-                        ForEach(memberApps.prefix(4)) { app in
-                            Image(nsImage: app.icon)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: settings.clampedIconSize * 0.28, height: settings.clampedIconSize * 0.28)
-                        }
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.fixed(settings.clampedIconSize * 0.28), spacing: 4), count: 2),
+                    spacing: 4
+                ) {
+                    ForEach(memberApps.prefix(4)) { app in
+                        Image(nsImage: app.icon)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: settings.clampedIconSize * 0.28, height: settings.clampedIconSize * 0.28)
                     }
                 }
-                .frame(width: settings.clampedIconSize, height: settings.clampedIconSize)
-                .shadow(color: .black.opacity(0.26), radius: 10, x: 0, y: 6)
-
-                Text(folder.name)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(.white)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .shadow(color: .black.opacity(0.45), radius: 2, x: 0, y: 1)
-                    .frame(width: settings.tileWidth, height: 34, alignment: .top)
             }
-            .frame(width: settings.tileWidth, height: settings.tileHeight)
-            .contentShape(Rectangle())
+            .frame(width: settings.clampedIconSize, height: settings.clampedIconSize)
+            .shadow(color: .black.opacity(0.26), radius: 10, x: 0, y: 6)
+
+            Text(folder.name)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .shadow(color: .black.opacity(0.45), radius: 2, x: 0, y: 1)
+                .frame(width: settings.tileWidth, height: 34, alignment: .top)
         }
-        .buttonStyle(.plain)
+        .frame(width: settings.tileWidth, height: settings.tileHeight)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: open)
         .help(folder.name)
     }
 }
