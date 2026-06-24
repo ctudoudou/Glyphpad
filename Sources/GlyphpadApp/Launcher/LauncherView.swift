@@ -62,6 +62,7 @@ struct LauncherView: View {
                 .scaleEffect(isContentPresented ? 1 : 1.018)
                 .blur(radius: isContentPresented ? 0 : 2)
                 .compositingGroup()
+                .allowsHitTesting(openFolder == nil && !suppressFolderOpen)
 
                 if let folder = openFolder {
                     FolderOverlay(
@@ -307,7 +308,7 @@ struct LauncherView: View {
     private func closeOpenFolder() {
         openFolder = nil
         suppressFolderOpen = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
             suppressFolderOpen = false
         }
     }
