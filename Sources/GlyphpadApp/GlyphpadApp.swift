@@ -18,6 +18,11 @@ private enum PageNavigationDirection: String {
     case next
 }
 
+private enum LauncherDropPlacement {
+    case before
+    case after
+}
+
 private enum LauncherPresentationAnimation {
     static let backdropIn = Animation.timingCurve(0.19, 1.0, 0.22, 1.0, duration: 0.22)
     static let contentIn = Animation.timingCurve(0.19, 1.0, 0.22, 1.0, duration: 0.28)
@@ -496,6 +501,8 @@ private struct LauncherView: View {
     @State private var openFolder: FolderRecord?
     @State private var isBackdropPresented = false
     @State private var isContentPresented = false
+    @State private var launcherItemFrames: [String: CGRect] = [:]
+    @State private var dragState: LauncherInternalDragState?
 
     private var filteredItems: [LauncherItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -564,8 +571,23 @@ private struct LauncherView: View {
                     )
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
+
+                if let dragState {
+                    LauncherDragPreview(
+                        item: dragState.item,
+                        settings: dragState.settings,
+                        library: library
+                    )
+                    .position(dragState.location)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
+            .coordinateSpace(name: "launcher-drag-space")
+            .onPreferenceChange(LauncherItemFramePreferenceKey.self) { frames in
+                launcherItemFrames = frames
+            }
             .animation(.easeOut(duration: 0.18), value: openFolder?.id)
         }
         .ignoresSafeArea()
@@ -636,7 +658,10 @@ private struct LauncherView: View {
                                     launch: { app in
                                         library.launch(app)
                                         dismiss()
-                                    }
+                                    },
+                                    activeDragItemID: dragState?.item.id,
+                                    onInternalDragChanged: updateInternalDrag,
+                                    onInternalDragEnded: finishInternalDrag
                                 )
                             }
                         }
@@ -657,10 +682,71 @@ private struct LauncherView: View {
                     launch: { app in
                         library.launch(app)
                         dismiss()
-                    }
+                    },
+                    activeDragItemID: dragState?.item.id,
+                    onInternalDragChanged: updateInternalDrag,
+                    onInternalDragEnded: finishInternalDrag
                 )
             }
         }
+    }
+
+    private func updateInternalDrag(item: LauncherItem, settings: LauncherSettings, location: CGPoint) {
+        dragState = LauncherInternalDragState(item: item, settings: settings, location: location)
+    }
+
+    private func finishInternalDrag(item: LauncherItem, settings: LauncherSettings, location: CGPoint) {
+        defer {
+            withAnimation(.easeOut(duration: 0.12)) {
+                dragState = nil
+            }
+        }
+
+        guard let target = dragTarget(at: location), target.item.id != item.id else {
+            return
+        }
+
+        let localLocation = CGPoint(
+            x: location.x - target.frame.minX,
+            y: location.y - target.frame.minY
+        )
+        let shouldCreateFolder = item.isApp
+            && target.item.isApp
+            && isIconDrop(localLocation, settings: settings)
+        let placement: LauncherDropPlacement = localLocation.x >= target.frame.width / 2 ? .after : .before
+
+        withAnimation(.easeOut(duration: 0.16)) {
+            _ = library.handleInternalDrop(
+                draggedItemID: item.id,
+                targetItemID: target.item.id,
+                shouldCreateFolder: shouldCreateFolder,
+                placement: placement
+            )
+        }
+    }
+
+    private func dragTarget(at location: CGPoint) -> (item: LauncherItem, frame: CGRect)? {
+        let itemsByID = Dictionary(uniqueKeysWithValues: filteredItems.map { ($0.id, $0) })
+        return launcherItemFrames
+            .compactMap { id, frame -> (LauncherItem, CGRect)? in
+                guard frame.contains(location), let item = itemsByID[id] else {
+                    return nil
+                }
+                return (item, frame)
+            }
+            .min { lhs, rhs in
+                lhs.1.area < rhs.1.area
+            }
+    }
+
+    private func isIconDrop(_ location: CGPoint, settings: LauncherSettings) -> Bool {
+        let iconLeft = (settings.tileWidth - settings.clampedIconSize) / 2
+        let iconRight = iconLeft + settings.clampedIconSize
+        let iconBottom = settings.clampedIconSize
+        return location.x >= iconLeft
+            && location.x <= iconRight
+            && location.y >= 0
+            && location.y <= iconBottom
     }
 
     private func dismiss() {
@@ -1656,6 +1742,20 @@ private struct SettingValueLabel: View {
     }
 }
 
+private struct LauncherInternalDragState: Equatable {
+    let item: LauncherItem
+    let settings: LauncherSettings
+    let location: CGPoint
+}
+
+private struct LauncherItemFramePreferenceKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, next in next })
+    }
+}
+
 private struct PagedLauncherGrid: View {
     let items: [LauncherItem]
     let settings: LauncherSettings
@@ -1665,6 +1765,9 @@ private struct PagedLauncherGrid: View {
     let openFolder: (FolderRecord) -> Void
     let dismiss: () -> Void
     let launch: (InstalledApplication) -> Void
+    let activeDragItemID: String?
+    let onInternalDragChanged: (LauncherItem, LauncherSettings, CGPoint) -> Void
+    let onInternalDragEnded: (LauncherItem, LauncherSettings, CGPoint) -> Void
     @State private var currentPageID: Int?
 
     private var pageSize: Int {
@@ -1706,7 +1809,10 @@ private struct PagedLauncherGrid: View {
                                     settings: settings,
                                     library: library,
                                     openFolder: openFolder,
-                                    launch: launch
+                                    launch: launch,
+                                    activeDragItemID: activeDragItemID,
+                                    onInternalDragChanged: onInternalDragChanged,
+                                    onInternalDragEnded: onInternalDragEnded
                                 )
                             }
                         }
@@ -1761,22 +1867,35 @@ private struct LauncherItemTile: View {
     @ObservedObject var library: ApplicationLibrary
     let openFolder: (FolderRecord) -> Void
     let launch: (InstalledApplication) -> Void
+    let activeDragItemID: String?
+    let onInternalDragChanged: (LauncherItem, LauncherSettings, CGPoint) -> Void
+    let onInternalDragEnded: (LauncherItem, LauncherSettings, CGPoint) -> Void
 
     var body: some View {
         tile
             .contentShape(Rectangle())
-            .onDrag {
-                LauncherDragPayload.itemProvider(for: item.id)
+            .opacity(activeDragItemID == item.id ? 0.42 : 1)
+            .scaleEffect(activeDragItemID == item.id ? 0.94 : 1)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: LauncherItemFramePreferenceKey.self,
+                        value: [item.id: proxy.frame(in: .named("launcher-drag-space"))]
+                    )
+                }
             }
-            .onDrop(
-                of: LauncherDragPayload.contentTypes,
-                delegate: LauncherItemDropDelegate(
-                    targetItemID: item.id,
-                    targetItem: item,
-                    settings: settings,
-                    library: library
-                )
-            )
+            .highPriorityGesture(internalDragGesture)
+            .animation(.easeOut(duration: 0.12), value: activeDragItemID)
+    }
+
+    private var internalDragGesture: some Gesture {
+        DragGesture(minimumDistance: 4, coordinateSpace: .named("launcher-drag-space"))
+            .onChanged { value in
+                onInternalDragChanged(item, settings, value.location)
+            }
+            .onEnded { value in
+                onInternalDragEnded(item, settings, value.location)
+            }
     }
 
     @ViewBuilder
@@ -1799,72 +1918,27 @@ private struct LauncherItemTile: View {
 
 }
 
-private enum LauncherDragPayload {
-    static let contentTypes: [UTType] = [.plainText, .text]
-
-    static func itemProvider(for itemID: String) -> NSItemProvider {
-        let provider = NSItemProvider()
-        provider.suggestedName = itemID
-        provider.registerDataRepresentation(
-            forTypeIdentifier: UTType.plainText.identifier,
-            visibility: .all
-        ) { completion in
-            completion(itemID.data(using: .utf8), nil)
-            return nil
-        }
-        return provider
-    }
-}
-
-private struct LauncherItemDropDelegate: DropDelegate {
-    let targetItemID: String
-    let targetItem: LauncherItem
+private struct LauncherDragPreview: View {
+    let item: LauncherItem
     let settings: LauncherSettings
     @ObservedObject var library: ApplicationLibrary
 
-    func validateDrop(info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: LauncherDragPayload.contentTypes)
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        guard let provider = info.itemProviders(for: LauncherDragPayload.contentTypes).first else {
-            return false
-        }
-
-        let shouldCreateFolder = shouldCreateFolder(at: info.location)
-        provider.loadDataRepresentation(forTypeIdentifier: UTType.plainText.identifier) { data, _ in
-            guard let data,
-                  let draggedItemID = String(data: data, encoding: .utf8) else {
-                return
-            }
-
-            Task { @MainActor in
-                _ = library.handleDrop(
-                    draggedItemID: draggedItemID,
-                    targetItemID: targetItemID,
-                    shouldCreateFolder: shouldCreateFolder
-                )
+    var body: some View {
+        Group {
+            switch item {
+            case .app(let app):
+                AppTile(app: app, settings: settings) {}
+            case .folder(let folder):
+                FolderTile(
+                    folder: folder,
+                    memberApps: library.apps(in: folder),
+                    settings: settings
+                ) {}
             }
         }
-        return true
-    }
-
-    private func shouldCreateFolder(at location: CGPoint) -> Bool {
-        guard targetItem.isApp else {
-            return false
-        }
-
-        let iconLeft = (settings.tileWidth - settings.clampedIconSize) / 2
-        let iconRight = iconLeft + settings.clampedIconSize
-        let iconBottom = settings.clampedIconSize
-        return location.x >= iconLeft
-            && location.x <= iconRight
-            && location.y >= 0
-            && location.y <= iconBottom
+        .scaleEffect(1.05)
+        .opacity(0.92)
+        .shadow(color: .black.opacity(0.34), radius: 18, x: 0, y: 10)
     }
 }
 
@@ -2169,6 +2243,39 @@ private final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         }
 
         return moveItem(draggedItemID: draggedItemID, before: targetItemID)
+    }
+
+    func handleInternalDrop(
+        draggedItemID: String,
+        targetItemID: String,
+        shouldCreateFolder: Bool,
+        placement: LauncherDropPlacement
+    ) -> Bool {
+        guard draggedItemID != targetItemID else {
+            return false
+        }
+
+        if let targetFolderID = Self.folderID(from: targetItemID),
+           let draggedAppID = Self.appID(from: draggedItemID) {
+            return add(appID: draggedAppID, toFolderID: targetFolderID)
+        }
+
+        if shouldCreateFolder,
+           let sourceAppID = Self.appID(from: draggedItemID),
+           let targetAppID = Self.appID(from: targetItemID) {
+            return createFolder(sourceAppID: sourceAppID, targetAppID: targetAppID) != nil
+        }
+
+        guard let targetIndex = launcherItems.firstIndex(where: { $0.id == targetItemID }) else {
+            return false
+        }
+
+        switch placement {
+        case .before:
+            return moveItem(draggedItemID: draggedItemID, to: targetIndex)
+        case .after:
+            return moveItem(draggedItemID: draggedItemID, to: targetIndex + 1)
+        }
     }
 
     func createFolder(sourceAppID: String, targetAppID: String) -> FolderRecord? {
@@ -2489,6 +2596,12 @@ private enum LauncherItem: Identifiable, Equatable {
             return true
         }
         return false
+    }
+}
+
+private extension CGRect {
+    var area: CGFloat {
+        width * height
     }
 }
 
