@@ -63,16 +63,20 @@ struct FolderOverlay: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                Color.black.opacity(0.30)
+                Rectangle()
+                    .fill(Color.black.opacity(0.30))
                     .ignoresSafeArea()
+                    .contentShape(Rectangle())
                     .onTapGesture(perform: close)
 
                 folderPanel(maxSize: proxy.size)
                     .frame(width: panelWidth(maxSize: proxy.size))
                     .frame(maxHeight: panelMaxHeight(maxSize: proxy.size))
                     .transition(.opacity.combined(with: .scale(scale: 0.965)))
+                    .onTapGesture {}
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
+            .contentShape(Rectangle())
         }
     }
 
