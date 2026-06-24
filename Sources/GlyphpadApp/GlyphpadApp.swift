@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 private extension Notification.Name {
     static let glyphpadToggleSettings = Notification.Name("GlyphpadToggleSettings")
     static let glyphpadNavigatePage = Notification.Name("GlyphpadNavigatePage")
+    static let glyphpadLauncherWillDismiss = Notification.Name("GlyphpadLauncherWillDismiss")
 }
 
 private enum PageNavigationDirection: String {
@@ -153,8 +154,9 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
 
         isDismissingLauncher = true
         window.ignoresMouseEvents = true
+        NotificationCenter.default.post(name: .glyphpadLauncherWillDismiss, object: window)
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.14
+            context.duration = 0.20
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             window.animator().alphaValue = 0
         } completionHandler: {
@@ -485,6 +487,7 @@ private struct LauncherView: View {
     @StateObject private var library = ApplicationLibrary()
     @State private var searchText = ""
     @State private var openFolder: FolderRecord?
+    @State private var isPresented = false
 
     private var filteredItems: [LauncherItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -517,6 +520,7 @@ private struct LauncherView: View {
                     .onTapGesture {
                         dismiss()
                     }
+                    .opacity(isPresented ? 1 : 0)
 
                 VStack(spacing: 34) {
                     SearchField(text: $searchText)
@@ -528,6 +532,9 @@ private struct LauncherView: View {
                         .padding(.bottom, max(28, proxy.safeAreaInsets.bottom + 18))
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
+                .opacity(isPresented ? 1 : 0)
+                .scaleEffect(isPresented ? 1 : 0.965)
+                .blur(radius: isPresented ? 0 : 8)
 
                 if let folder = openFolder {
                     FolderOverlay(
@@ -551,11 +558,21 @@ private struct LauncherView: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
             .animation(.easeOut(duration: 0.18), value: openFolder?.id)
+            .animation(.smooth(duration: 0.24, extraBounce: 0.08), value: isPresented)
         }
         .ignoresSafeArea()
         .focusable()
         .onAppear {
             library.reload()
+            withAnimation(.smooth(duration: 0.24, extraBounce: 0.08)) {
+                isPresented = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .glyphpadLauncherWillDismiss)) { _ in
+            withAnimation(.easeInOut(duration: 0.16)) {
+                isPresented = false
+                openFolder = nil
+            }
         }
         .onExitCommand {
             dismiss()
