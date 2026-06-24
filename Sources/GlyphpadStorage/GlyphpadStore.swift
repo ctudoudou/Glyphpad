@@ -1,7 +1,7 @@
 import Foundation
 
 public final class GlyphpadStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 4
 
     private let database: SQLiteDatabase
 
@@ -93,6 +93,10 @@ public final class GlyphpadStore: @unchecked Sendable {
                 icon_size REAL NOT NULL,
                 auto_arrange INTEGER NOT NULL,
                 navigation_mode TEXT NOT NULL,
+                background_image_path TEXT,
+                background_blur_radius REAL NOT NULL DEFAULT 18,
+                api_endpoint TEXT,
+                api_key TEXT,
                 updated_at TEXT NOT NULL
             );
 
@@ -103,5 +107,9 @@ public final class GlyphpadStore: @unchecked Sendable {
         )
 
         try? database.execute("ALTER TABLE folders ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';")
+        try? database.execute("ALTER TABLE launcher_settings ADD COLUMN background_image_path TEXT;")
+        try? database.execute("ALTER TABLE launcher_settings ADD COLUMN background_blur_radius REAL NOT NULL DEFAULT 18;")
+        try? database.execute("ALTER TABLE launcher_settings ADD COLUMN api_endpoint TEXT;")
+        try? database.execute("ALTER TABLE launcher_settings ADD COLUMN api_key TEXT;")
     }
 }

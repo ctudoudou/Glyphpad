@@ -1,10 +1,33 @@
 import AppKit
+import Darwin
 import GlyphpadCore
 import GlyphpadStorage
 import SwiftUI
+import UniformTypeIdentifiers
 
 private extension Notification.Name {
     static let glyphpadToggleSettings = Notification.Name("GlyphpadToggleSettings")
+}
+
+private enum PerformanceLog {
+    static func start() -> TimeInterval {
+        ProcessInfo.processInfo.systemUptime
+    }
+
+    static func finish(_ name: String, startedAt start: TimeInterval, metadata: String = "") {
+        let elapsedMilliseconds = (ProcessInfo.processInfo.systemUptime - start) * 1_000
+        let suffix = metadata.isEmpty ? "" : " \(metadata)"
+        NSLog("Glyphpad performance: \(name) %.1fms\(suffix)", elapsedMilliseconds)
+    }
+
+    @discardableResult
+    static func measure<T>(_ name: String, metadata: String = "", _ work: () throws -> T) rethrows -> T {
+        let startedAt = start()
+        defer {
+            finish(name, startedAt: startedAt, metadata: metadata)
+        }
+        return try work()
+    }
 }
 
 @main
@@ -17,33 +40,47 @@ private struct GlyphpadMain {
         let delegate = LauncherAppDelegate()
         Self.delegate = delegate
         app.delegate = delegate
-        app.setActivationPolicy(.accessory)
+        app.setActivationPolicy(.regular)
         app.run()
     }
 }
 
 @MainActor
-private final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
+private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var window: LauncherWindow?
+    private var settingsWindow: NSWindow?
+    private let settingsController = LauncherSettingsController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApplication.shared.setActivationPolicy(.accessory)
         NSApplication.shared.presentationOptions = [.autoHideDock, .autoHideMenuBar]
+        NotificationCenter.default.addObserver(
+            forName: .glyphpadToggleSettings,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.showSettingsWindow()
+            }
+        }
         showLauncher()
     }
 
     private func showLauncher() {
+        let startedAt = PerformanceLog.start()
         let screen = NSScreen.main ?? NSScreen.screens.first
         let frame = screen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let window = LauncherWindow(contentRect: frame)
         window.dismissHandler = { [weak self] in self?.dismissLauncher() }
 
-        let settingsController = LauncherSettingsController()
         let rootView = LauncherView(settingsController: settingsController) { [weak self] in
             self?.dismissLauncher()
         }
 
-        window.contentView = NSHostingView(rootView: rootView)
+        let hostingView = NSHostingView(rootView: rootView)
+        hostingView.frame = NSRect(origin: .zero, size: frame.size)
+        hostingView.autoresizingMask = [.width, .height]
+        hostingView.wantsLayer = true
+        window.contentView = hostingView
         window.setFrame(frame, display: true)
         window.alphaValue = 0
         window.makeKeyAndOrderFront(nil)
@@ -57,11 +94,18 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
             context.duration = 0.18
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
+        } completionHandler: {
+            PerformanceLog.finish("launcher.open", startedAt: startedAt)
+            Task { @MainActor in
+                NSApplication.shared.setActivationPolicy(.accessory)
+            }
         }
     }
 
     private func dismissLauncher() {
+        let startedAt = PerformanceLog.start()
         guard let window else {
+            PerformanceLog.finish("launcher.close.no-window", startedAt: startedAt)
             NSApplication.shared.terminate(nil)
             return
         }
@@ -72,8 +116,47 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate {
             window.animator().alphaValue = 0
         } completionHandler: {
             DispatchQueue.main.async {
+                PerformanceLog.finish("launcher.close", startedAt: startedAt)
+                self.window = nil
+                if self.settingsWindow?.isVisible == true {
+                    return
+                }
                 NSApplication.shared.terminate(nil)
             }
+        }
+    }
+
+    private func showSettingsWindow() {
+        if let settingsWindow {
+            settingsWindow.makeKeyAndOrderFront(nil)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let settingsWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        settingsWindow.title = "Glyphpad Settings"
+        settingsWindow.isReleasedWhenClosed = false
+        settingsWindow.delegate = self
+        settingsWindow.center()
+        settingsWindow.contentView = NSHostingView(rootView: SettingsWindowView(controller: settingsController))
+        settingsWindow.makeKeyAndOrderFront(nil)
+        self.settingsWindow = settingsWindow
+        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let closingWindow = notification.object as? NSWindow, closingWindow === settingsWindow else {
+            return
+        }
+
+        settingsWindow = nil
+        if window == nil {
+            NSApplication.shared.terminate(nil)
         }
     }
 }
@@ -94,7 +177,7 @@ private final class LauncherWindow: NSWindow {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        level = .screenSaver
+        level = .mainMenu
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .stationary]
         ignoresMouseEvents = false
         acceptsMouseMovedEvents = true
@@ -125,9 +208,7 @@ private struct LauncherView: View {
 
     @StateObject private var library = ApplicationLibrary()
     @State private var searchText = ""
-    @State private var showsSettings = false
     @State private var openFolder: FolderRecord?
-    @State private var visible = false
 
     private var filteredItems: [LauncherItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -156,7 +237,7 @@ private struct LauncherView: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack {
-                DesktopBackdrop()
+                DesktopBackdrop(settings: settingsController.settings)
                     .onTapGesture {
                         dismiss()
                     }
@@ -171,17 +252,6 @@ private struct LauncherView: View {
                         .padding(.bottom, max(28, proxy.safeAreaInsets.bottom + 18))
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
-                .scaleEffect(visible ? 1 : 0.985)
-                .opacity(visible ? 1 : 0)
-                .animation(.easeOut(duration: 0.18), value: visible)
-
-                if showsSettings {
-                    SettingsPanel(controller: settingsController)
-                        .padding(.top, max(100, proxy.safeAreaInsets.top + 84))
-                        .padding(.trailing, 54)
-                        .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topTrailing)
-                        .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .topTrailing)))
-                }
 
                 if let folder = openFolder {
                     FolderOverlay(
@@ -204,20 +274,15 @@ private struct LauncherView: View {
                 }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
-            .animation(.easeOut(duration: 0.16), value: showsSettings)
             .animation(.easeOut(duration: 0.18), value: openFolder?.id)
         }
         .ignoresSafeArea()
         .focusable()
         .onAppear {
             library.reload()
-            visible = true
         }
         .onExitCommand {
             dismiss()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .glyphpadToggleSettings)) { _ in
-            showsSettings.toggle()
         }
     }
 
@@ -281,10 +346,7 @@ private struct LauncherView: View {
     }
 
     private func dismiss() {
-        visible = false
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            onDismiss()
-        }
+        onDismiss()
     }
 
     @ViewBuilder
@@ -353,65 +415,135 @@ private enum AppStoreFactory {
     }
 }
 
-private struct SettingsPanel: View {
+private struct SettingsWindowView: View {
     @ObservedObject var controller: LauncherSettingsController
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Layout")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
+        VStack(alignment: .leading, spacing: 22) {
+            Text("Glyphpad Settings")
+                .font(.system(size: 24, weight: .semibold))
 
-            Toggle("Auto arrange", isOn: Binding(
-                get: { controller.settings.autoArrange },
-                set: { value in controller.update { $0.autoArrange = value } }
-            ))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    settingsSection("Launcher") {
+                        Toggle("Auto arrange", isOn: Binding(
+                            get: { controller.settings.autoArrange },
+                            set: { value in controller.update { $0.autoArrange = value } }
+                        ))
 
-            Stepper(value: Binding(
-                get: { controller.settings.columns },
-                set: { value in controller.update { $0.columns = value } }
-            ), in: 4...12) {
-                SettingValueLabel(title: "Columns", value: "\(controller.settings.clampedColumns)")
+                        Stepper(value: Binding(
+                            get: { controller.settings.columns },
+                            set: { value in controller.update { $0.columns = value } }
+                        ), in: 4...12) {
+                            SettingValueLabel(title: "Columns", value: "\(controller.settings.clampedColumns)")
+                        }
+                        .disabled(controller.settings.autoArrange)
+
+                        Stepper(value: Binding(
+                            get: { controller.settings.rows },
+                            set: { value in controller.update { $0.rows = value } }
+                        ), in: 3...8) {
+                            SettingValueLabel(title: "Rows", value: "\(controller.settings.clampedRows)")
+                        }
+                        .disabled(controller.settings.autoArrange)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            SettingValueLabel(title: "Icon size", value: "\(Int(controller.settings.clampedIconSize))")
+
+                            Slider(value: Binding(
+                                get: { Double(controller.settings.iconSize) },
+                                set: { value in controller.update { $0.iconSize = CGFloat(value) } }
+                            ), in: 48...112, step: 2)
+                        }
+
+                        Picker("Navigation", selection: Binding(
+                            get: { controller.settings.navigationMode },
+                            set: { value in controller.update { $0.navigationMode = value } }
+                        )) {
+                            Text("Vertical").tag(LauncherNavigationMode.verticalScroll)
+                            Text("Pages").tag(LauncherNavigationMode.horizontalPages)
+                        }
+                        .pickerStyle(.segmented)
+                    }
+
+                    settingsSection("Background") {
+                        HStack(spacing: 10) {
+                            Button("Choose Image") {
+                                chooseBackgroundImage()
+                            }
+
+                            Button("Clear") {
+                                controller.update { $0.backgroundImagePath = nil }
+                            }
+                            .disabled(controller.settings.backgroundImagePath == nil)
+                        }
+
+                        if let backgroundImagePath = controller.settings.backgroundImagePath {
+                            Text(backgroundImagePath)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            SettingValueLabel(
+                                title: "Blur",
+                                value: "\(Int(controller.settings.clampedBackgroundBlurRadius))"
+                            )
+
+                            Slider(value: Binding(
+                                get: { Double(controller.settings.backgroundBlurRadius) },
+                                set: { value in controller.update { $0.backgroundBlurRadius = CGFloat(value) } }
+                            ), in: 0...48, step: 1)
+                        }
+                    }
+
+                    settingsSection("API") {
+                        TextField("Endpoint", text: Binding(
+                            get: { controller.settings.apiEndpoint ?? "" },
+                            set: { value in controller.update { $0.apiEndpoint = value } }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+
+                        SecureField("API Key", text: Binding(
+                            get: { controller.settings.apiKey ?? "" },
+                            set: { value in controller.update { $0.apiKey = value } }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                    }
+                }
+                .padding(.trailing, 8)
             }
-            .disabled(controller.settings.autoArrange)
-
-            Stepper(value: Binding(
-                get: { controller.settings.rows },
-                set: { value in controller.update { $0.rows = value } }
-            ), in: 3...8) {
-                SettingValueLabel(title: "Rows", value: "\(controller.settings.clampedRows)")
-            }
-            .disabled(controller.settings.autoArrange)
-
-            VStack(alignment: .leading, spacing: 8) {
-                SettingValueLabel(title: "Icon size", value: "\(Int(controller.settings.clampedIconSize))")
-
-                Slider(value: Binding(
-                    get: { Double(controller.settings.iconSize) },
-                    set: { value in controller.update { $0.iconSize = CGFloat(value) } }
-                ), in: 48...112, step: 2)
-            }
-
-            Picker("Navigation", selection: Binding(
-                get: { controller.settings.navigationMode },
-                set: { value in controller.update { $0.navigationMode = value } }
-            )) {
-                Text("Vertical").tag(LauncherNavigationMode.verticalScroll)
-                Text("Pages").tag(LauncherNavigationMode.horizontalPages)
-            }
-            .pickerStyle(.segmented)
         }
         .toggleStyle(.switch)
-        .foregroundStyle(.white)
         .controlSize(.regular)
-        .padding(18)
-        .frame(width: 292)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(.white.opacity(0.14), lineWidth: 1)
+        .padding(24)
+        .frame(width: 560, height: 620)
+    }
+
+    @ViewBuilder
+    private func settingsSection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title)
+                .font(.system(size: 15, weight: .semibold))
+            content()
         }
-        .shadow(color: .black.opacity(0.32), radius: 22, x: 0, y: 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.bottom, 8)
+        Divider()
+    }
+
+    private func chooseBackgroundImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+
+        if panel.runModal() == .OK, let url = panel.url {
+            controller.update { $0.backgroundImagePath = url.path }
+        }
     }
 }
 
@@ -711,11 +843,32 @@ private struct PageDots: View {
 }
 
 private struct DesktopBackdrop: View {
+    let settings: LauncherSettings
+
     var body: some View {
         ZStack {
-            VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow)
+            if let image = backgroundImage {
+                GeometryReader { proxy in
+                    Image(nsImage: image)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .blur(radius: settings.clampedBackgroundBlurRadius)
+                        .scaleEffect(settings.clampedBackgroundBlurRadius > 0 ? 1.06 : 1)
+                        .clipped()
+                }
+            } else {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.08, green: 0.08, blue: 0.09),
+                        Color(red: 0.15, green: 0.15, blue: 0.16)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            }
 
-            Color.black.opacity(0.20)
+            Color.black.opacity(backgroundImage == nil ? 0.34 : 0.26)
 
             RadialGradient(
                 colors: [
@@ -728,6 +881,14 @@ private struct DesktopBackdrop: View {
                 endRadius: 760
             )
         }
+    }
+
+    private var backgroundImage: NSImage? {
+        guard let path = settings.backgroundImagePath else {
+            return nil
+        }
+
+        return NSImage(contentsOfFile: path)
     }
 }
 
@@ -751,7 +912,7 @@ private struct VisualEffectView: NSViewRepresentable {
 }
 
 @MainActor
-private final class ApplicationLibrary: ObservableObject {
+private final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
     @Published private(set) var apps: [InstalledApplication] = []
     @Published private(set) var folders: [FolderRecord] = []
 
@@ -759,6 +920,8 @@ private final class ApplicationLibrary: ObservableObject {
     private let appRepository: SQLiteAppRepository?
     private let folderRepository: SQLiteFolderRepository?
     private var refreshTask: Task<Void, Never>?
+    private var directoryWatcher: ApplicationDirectoryWatcher?
+    private var appIndex: [String: InstalledApplication] = [:]
 
     init() {
         do {
@@ -778,21 +941,38 @@ private final class ApplicationLibrary: ObservableObject {
         return folders.map(LauncherItem.folder) + visibleApps.map(LauncherItem.app)
     }
 
-    func reload() {
+    func reload(reason: String = "manual") {
+        startWatchingApplicationDirectories()
+        let reloadStartedAt = PerformanceLog.start()
+
         loadFolders()
-        loadCachedApps()
+        PerformanceLog.measure("library.cache.load", metadata: "reason=\(reason)") {
+            loadCachedApps()
+        }
+
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
+            let scanStartedAt = PerformanceLog.start()
             let scannedApps = await Task.detached(priority: .userInitiated) {
                 ApplicationScanner().scan()
             }.value
+            PerformanceLog.finish("library.scan", startedAt: scanStartedAt, metadata: "count=\(scannedApps.count) reason=\(reason)")
 
             guard !Task.isCancelled else {
                 return
             }
 
-            self?.publish(scannedApps)
-            self?.persist(scannedApps)
+            guard let self else {
+                return
+            }
+
+            PerformanceLog.measure("library.publish", metadata: "count=\(scannedApps.count) reason=\(reason)") {
+                self.publish(scannedApps)
+            }
+            PerformanceLog.measure("library.persist", metadata: "count=\(scannedApps.count) reason=\(reason)") {
+                self.persist(scannedApps)
+            }
+            PerformanceLog.finish("library.reload", startedAt: reloadStartedAt, metadata: "reason=\(reason)")
         }
     }
 
@@ -812,11 +992,7 @@ private final class ApplicationLibrary: ObservableObject {
     }
 
     func apps(in folder: FolderRecord) -> [InstalledApplication] {
-        var appByID: [String: InstalledApplication] = [:]
-        for app in apps where appByID[app.id] == nil {
-            appByID[app.id] = app
-        }
-        return folder.appBundleIdentifiers.compactMap { appByID[$0] }
+        folder.appBundleIdentifiers.compactMap { appIndex[$0] }
     }
 
     func createFolder(sourceAppID: String, targetAppID: String) -> FolderRecord? {
@@ -826,7 +1002,7 @@ private final class ApplicationLibrary: ObservableObject {
         guard folderRepository != nil else {
             return nil
         }
-        guard apps.contains(where: { $0.id == sourceAppID }), apps.contains(where: { $0.id == targetAppID }) else {
+        guard appIndex[sourceAppID] != nil, appIndex[targetAppID] != nil else {
             return nil
         }
         if folders.contains(where: { folder in
@@ -873,7 +1049,7 @@ private final class ApplicationLibrary: ObservableObject {
                 InstalledApplication(record: record, iconCache: iconCache)
             }
             if !cachedApps.isEmpty {
-                apps = cachedApps
+                setApps(cachedApps)
             }
         } catch {
             NSLog("Failed to load cached apps: \(error.localizedDescription)")
@@ -889,7 +1065,7 @@ private final class ApplicationLibrary: ObservableObject {
     }
 
     private func publish(_ scannedApps: [ScannedApplication]) {
-        apps = dedupe(scannedApps.map { app in
+        setApps(scannedApps.map { app in
             InstalledApplication(scannedApp: app, iconCache: iconCache)
         })
     }
@@ -911,6 +1087,29 @@ private final class ApplicationLibrary: ObservableObject {
     private func dedupe(_ apps: [InstalledApplication]) -> [InstalledApplication] {
         var seen = Set<String>()
         return apps.filter { seen.insert($0.id).inserted }
+    }
+
+    private func setApps(_ nextApps: [InstalledApplication]) {
+        let dedupedApps = dedupe(nextApps)
+        var nextIndex: [String: InstalledApplication] = [:]
+        for app in dedupedApps where nextIndex[app.id] == nil {
+            nextIndex[app.id] = app
+        }
+
+        apps = dedupedApps
+        appIndex = nextIndex
+    }
+
+    private func startWatchingApplicationDirectories() {
+        guard directoryWatcher == nil else {
+            return
+        }
+
+        directoryWatcher = ApplicationDirectoryWatcher(roots: ApplicationScanner.standardRoots()) { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.reload(reason: "application-directory-change")
+            }
+        }
     }
 }
 
@@ -997,6 +1196,21 @@ private struct ScannedApplication: Sendable {
 }
 
 private struct ApplicationScanner: Sendable {
+    static func standardRoots() -> [URL] {
+        let fileManager = FileManager.default
+        var roots = [
+            URL(fileURLWithPath: "/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/System/Applications", isDirectory: true),
+            URL(fileURLWithPath: "/System/Applications/Utilities", isDirectory: true)
+        ]
+
+        if let userApplications = fileManager.urls(for: .applicationDirectory, in: .userDomainMask).first {
+            roots.append(userApplications)
+        }
+
+        return roots
+    }
+
     func scan() -> [ScannedApplication] {
         var seenPaths = Set<String>()
         var apps: [ScannedApplication] = []
@@ -1022,18 +1236,7 @@ private struct ApplicationScanner: Sendable {
     }
 
     private func scanRoots() -> [URL] {
-        let fileManager = FileManager.default
-        var roots = [
-            URL(fileURLWithPath: "/Applications", isDirectory: true),
-            URL(fileURLWithPath: "/System/Applications", isDirectory: true),
-            URL(fileURLWithPath: "/System/Applications/Utilities", isDirectory: true)
-        ]
-
-        if let userApplications = fileManager.urls(for: .applicationDirectory, in: .userDomainMask).first {
-            roots.append(userApplications)
-        }
-
-        return roots
+        Self.standardRoots()
     }
 
     private func appBundleURLs(under root: URL) -> [URL] {
@@ -1088,5 +1291,62 @@ private struct ApplicationScanner: Sendable {
             displayName: displayName,
             bundleIdentifier: bundleIdentifier
         )
+    }
+}
+
+private final class ApplicationDirectoryWatcher: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "Glyphpad.ApplicationDirectoryWatcher", qos: .utility)
+    private let onChange: @Sendable () -> Void
+    private var sources: [DispatchSourceFileSystemObject] = []
+    private var debounceWorkItem: DispatchWorkItem?
+
+    init(roots: [URL], onChange: @escaping @Sendable () -> Void) {
+        self.onChange = onChange
+
+        for root in roots {
+            guard FileManager.default.fileExists(atPath: root.path) else {
+                continue
+            }
+
+            let fileDescriptor = open(root.path, O_EVTONLY)
+            guard fileDescriptor >= 0 else {
+                continue
+            }
+
+            let source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fileDescriptor,
+                eventMask: [.write, .rename, .delete, .extend, .attrib],
+                queue: queue
+            )
+
+            source.setEventHandler { [weak self] in
+                self?.scheduleRefresh()
+            }
+            source.setCancelHandler {
+                close(fileDescriptor)
+            }
+            sources.append(source)
+            source.resume()
+        }
+
+        NSLog("Glyphpad performance: app-directory-watcher roots=%d", sources.count)
+    }
+
+    deinit {
+        debounceWorkItem?.cancel()
+        for source in sources {
+            source.cancel()
+        }
+    }
+
+    private func scheduleRefresh() {
+        debounceWorkItem?.cancel()
+
+        let onChange = onChange
+        let item = DispatchWorkItem {
+            onChange()
+        }
+        debounceWorkItem = item
+        queue.asyncAfter(deadline: .now() + 0.8, execute: item)
     }
 }

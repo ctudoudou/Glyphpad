@@ -19,7 +19,11 @@ final class SQLiteLauncherSettingsRepositoryTests: XCTestCase {
             rows: 6,
             iconSize: 88,
             autoArrange: false,
-            navigationMode: .horizontalPages
+            navigationMode: .horizontalPages,
+            backgroundImagePath: "/tmp/glyphpad-background.png",
+            backgroundBlurRadius: 24,
+            apiEndpoint: "https://api.example.test/v1",
+            apiKey: "test-key"
         )
 
         try repository.save(settings)
@@ -35,7 +39,11 @@ final class SQLiteLauncherSettingsRepositoryTests: XCTestCase {
             rows: 1,
             iconSize: 300,
             autoArrange: false,
-            navigationMode: .verticalScroll
+            navigationMode: .verticalScroll,
+            backgroundImagePath: "   ",
+            backgroundBlurRadius: 300,
+            apiEndpoint: "  ",
+            apiKey: " secret "
         )
 
         try repository.save(settings)
@@ -47,7 +55,11 @@ final class SQLiteLauncherSettingsRepositoryTests: XCTestCase {
                 rows: 3,
                 iconSize: 112,
                 autoArrange: false,
-                navigationMode: .verticalScroll
+                navigationMode: .verticalScroll,
+                backgroundImagePath: nil,
+                backgroundBlurRadius: 48,
+                apiEndpoint: nil,
+                apiKey: "secret"
             )
         )
     }

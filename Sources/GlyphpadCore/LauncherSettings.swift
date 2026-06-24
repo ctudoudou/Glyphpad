@@ -12,19 +12,31 @@ public struct LauncherSettings: Equatable, Sendable {
     public var iconSize: CGFloat
     public var autoArrange: Bool
     public var navigationMode: LauncherNavigationMode
+    public var backgroundImagePath: String?
+    public var backgroundBlurRadius: CGFloat
+    public var apiEndpoint: String?
+    public var apiKey: String?
 
     public init(
         columns: Int,
         rows: Int,
         iconSize: CGFloat,
         autoArrange: Bool,
-        navigationMode: LauncherNavigationMode
+        navigationMode: LauncherNavigationMode,
+        backgroundImagePath: String? = nil,
+        backgroundBlurRadius: CGFloat = 18,
+        apiEndpoint: String? = nil,
+        apiKey: String? = nil
     ) {
         self.columns = columns
         self.rows = rows
         self.iconSize = iconSize
         self.autoArrange = autoArrange
         self.navigationMode = navigationMode
+        self.backgroundImagePath = backgroundImagePath
+        self.backgroundBlurRadius = backgroundBlurRadius
+        self.apiEndpoint = apiEndpoint
+        self.apiKey = apiKey
     }
 
     public static let `default` = LauncherSettings(
@@ -32,7 +44,11 @@ public struct LauncherSettings: Equatable, Sendable {
         rows: 5,
         iconSize: 76,
         autoArrange: true,
-        navigationMode: .verticalScroll
+        navigationMode: .verticalScroll,
+        backgroundImagePath: nil,
+        backgroundBlurRadius: 18,
+        apiEndpoint: nil,
+        apiKey: nil
     )
 
     public var clampedColumns: Int {
@@ -45,6 +61,10 @@ public struct LauncherSettings: Equatable, Sendable {
 
     public var clampedIconSize: CGFloat {
         min(max(iconSize, 48), 112)
+    }
+
+    public var clampedBackgroundBlurRadius: CGFloat {
+        min(max(backgroundBlurRadius, 0), 48)
     }
 
     public var tileWidth: CGFloat {
@@ -81,7 +101,11 @@ public struct LauncherSettings: Equatable, Sendable {
             rows: fittedRows,
             iconSize: clampedIconSize,
             autoArrange: autoArrange,
-            navigationMode: navigationMode
+            navigationMode: navigationMode,
+            backgroundImagePath: normalized(backgroundImagePath),
+            backgroundBlurRadius: clampedBackgroundBlurRadius,
+            apiEndpoint: normalized(apiEndpoint),
+            apiKey: normalized(apiKey)
         )
     }
 
@@ -91,7 +115,20 @@ public struct LauncherSettings: Equatable, Sendable {
             rows: clampedRows,
             iconSize: clampedIconSize,
             autoArrange: autoArrange,
-            navigationMode: navigationMode
+            navigationMode: navigationMode,
+            backgroundImagePath: normalized(backgroundImagePath),
+            backgroundBlurRadius: clampedBackgroundBlurRadius,
+            apiEndpoint: normalized(apiEndpoint),
+            apiKey: normalized(apiKey)
         )
+    }
+
+    private func normalized(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
