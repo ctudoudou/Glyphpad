@@ -501,6 +501,7 @@ private struct LauncherView: View {
     @State private var openFolder: FolderRecord?
     @State private var isBackdropPresented = false
     @State private var isContentPresented = false
+    @State private var currentPageID: Int? = 0
     @State private var launcherItemFrames: [String: CGRect] = [:]
     @State private var dragState: LauncherInternalDragState?
 
@@ -683,6 +684,7 @@ private struct LauncherView: View {
                         library.launch(app)
                         dismiss()
                     },
+                    currentPageID: $currentPageID,
                     activeDragItemID: dragState?.item.id,
                     onInternalDragChanged: updateInternalDrag,
                     onInternalDragEnded: finishInternalDrag
@@ -758,7 +760,7 @@ private struct LauncherView: View {
         if settings.navigationMode == .horizontalPages {
             let pageSize = max(1, settings.clampedColumns * settings.clampedRows)
             let pageCount = max(1, Int(ceil(Double(filteredItems.count) / Double(pageSize))))
-            PageDots(pageCount: pageCount)
+            PageDots(pageCount: pageCount, currentPageID: $currentPageID)
         } else {
             Color.clear.frame(width: 1, height: 8)
         }
@@ -1765,10 +1767,10 @@ private struct PagedLauncherGrid: View {
     let openFolder: (FolderRecord) -> Void
     let dismiss: () -> Void
     let launch: (InstalledApplication) -> Void
+    @Binding var currentPageID: Int?
     let activeDragItemID: String?
     let onInternalDragChanged: (LauncherItem, LauncherSettings, CGPoint) -> Void
     let onInternalDragEnded: (LauncherItem, LauncherSettings, CGPoint) -> Void
-    @State private var currentPageID: Int?
 
     private var pageSize: Int {
         settings.clampedColumns * settings.clampedRows
@@ -2060,16 +2062,26 @@ private struct EmptySearchView: View {
 
 private struct PageDots: View {
     let pageCount: Int
+    @Binding var currentPageID: Int?
 
     var body: some View {
         HStack(spacing: 8) {
             ForEach(0..<pageCount, id: \.self) { index in
                 Circle()
-                    .fill(index == 0 ? .white.opacity(0.9) : .white.opacity(0.32))
-                    .frame(width: 7, height: 7)
+                    .fill(index == currentPage ? .white.opacity(0.9) : .white.opacity(0.32))
+                    .frame(width: index == currentPage ? 8 : 7, height: index == currentPage ? 8 : 7)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        currentPageID = index
+                    }
             }
         }
         .frame(height: 8)
+        .animation(.easeOut(duration: 0.16), value: currentPage)
+    }
+
+    private var currentPage: Int {
+        min(max(currentPageID ?? 0, 0), max(0, pageCount - 1))
     }
 }
 
