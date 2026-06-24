@@ -455,7 +455,6 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         orderedItems += baseItems.filter { usedIDs.insert($0.id).inserted }
 
         launcherItems = orderedItems
-        persistLayoutIfNeeded(for: orderedItems)
     }
 
     private func moveItem(draggedItemID: String, before targetItemID: String) -> Bool {
@@ -488,15 +487,6 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
 
     private func saveCurrentLayout() {
         saveLayout(for: launcherItems)
-    }
-
-    private func persistLayoutIfNeeded(for items: [LauncherItem]) {
-        let nextLayoutOrder = items.map(\.id)
-        guard !nextLayoutOrder.isEmpty, nextLayoutOrder != layoutOrder else {
-            return
-        }
-
-        saveLayout(for: items)
     }
 
     private func saveLayout(for items: [LauncherItem]) {
