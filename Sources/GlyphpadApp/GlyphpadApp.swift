@@ -52,6 +52,7 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
     private let settingsController = LauncherSettingsController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installMenu()
         NSApplication.shared.presentationOptions = [.autoHideDock, .autoHideMenuBar]
         NotificationCenter.default.addObserver(
             forName: .glyphpadToggleSettings,
@@ -133,6 +134,10 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         }
     }
 
+    @objc private func openSettingsFromMenu(_ sender: Any?) {
+        showSettingsWindow()
+    }
+
     private func showSettingsWindow() {
         if let settingsWindow {
             settingsWindow.makeKeyAndOrderFront(nil)
@@ -167,6 +172,33 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
             settingsController.flush()
             NSApplication.shared.terminate(nil)
         }
+    }
+
+    private func installMenu() {
+        let mainMenu = NSMenu()
+
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(
+            NSMenuItem(
+                title: "Settings...",
+                action: #selector(openSettingsFromMenu(_:)),
+                keyEquivalent: ","
+            )
+        )
+        appMenu.items.last?.target = self
+        appMenu.addItem(.separator())
+        appMenu.addItem(
+            NSMenuItem(
+                title: "Quit Glyphpad",
+                action: #selector(NSApplication.terminate(_:)),
+                keyEquivalent: "q"
+            )
+        )
+        appMenuItem.submenu = appMenu
+
+        mainMenu.addItem(appMenuItem)
+        NSApplication.shared.mainMenu = mainMenu
     }
 }
 
@@ -208,6 +240,16 @@ private final class LauncherWindow: NSWindow {
         }
 
         super.keyDown(with: event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
+           event.charactersIgnoringModifiers == "," {
+            NotificationCenter.default.post(name: .glyphpadToggleSettings, object: nil)
+            return true
+        }
+
+        return super.performKeyEquivalent(with: event)
     }
 }
 
