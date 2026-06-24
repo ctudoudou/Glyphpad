@@ -92,6 +92,37 @@ public final class SQLiteFolderRepository: FolderRepository, @unchecked Sendable
         _ = try statement.step()
     }
 
+    public func updateMembers(folderID: UUID, appBundleIdentifiers: [String]) throws {
+        try database.execute("BEGIN TRANSACTION;")
+        do {
+            let folderStatement = try database.prepare(
+                """
+                UPDATE folders
+                SET updated_at = ?
+                WHERE id = ?;
+                """
+            )
+            try folderStatement.bind(dateFormatter.string(from: Date()), at: 1)
+            try folderStatement.bind(folderID.uuidString, at: 2)
+            _ = try folderStatement.step()
+
+            let deleteStatement = try database.prepare(
+                """
+                DELETE FROM folder_members
+                WHERE folder_id = ?;
+                """
+            )
+            try deleteStatement.bind(folderID.uuidString, at: 1)
+            _ = try deleteStatement.step()
+
+            try saveMembers(folderID: folderID, appBundleIdentifiers: dedupe(appBundleIdentifiers))
+            try database.execute("COMMIT;")
+        } catch {
+            try? database.execute("ROLLBACK;")
+            throw error
+        }
+    }
+
     private func fetchMembers(folderID: UUID) throws -> [String] {
         let statement = try database.prepare(
             """

@@ -22,6 +22,10 @@ public final class GlyphpadStore: @unchecked Sendable {
         SQLiteFolderRepository(database: database)
     }
 
+    public func layoutRepository() -> SQLiteLayoutRepository {
+        SQLiteLayoutRepository(database: database)
+    }
+
     private func migrate() throws {
         try database.execute(
             """

@@ -65,6 +65,10 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         showLauncher()
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        settingsController.flush()
+    }
+
     private func showLauncher() {
         let startedAt = PerformanceLog.start()
         let screen = NSScreen.main ?? NSScreen.screens.first
@@ -123,6 +127,7 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
                 if self.settingsWindow?.isVisible == true {
                     return
                 }
+                self.settingsController.flush()
                 NSApplication.shared.terminate(nil)
             }
         }
@@ -159,6 +164,7 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
 
         settingsWindow = nil
         if window == nil {
+            settingsController.flush()
             NSApplication.shared.terminate(nil)
         }
     }
@@ -328,21 +334,29 @@ private struct LauncherView: View {
             switch settings.navigationMode {
             case .verticalScroll:
                 ScrollView(.vertical, showsIndicators: false) {
-                    LazyVGrid(columns: gridColumns(for: settings), spacing: settings.verticalSpacing) {
-                        ForEach(filteredItems) { item in
-                            LauncherItemTile(
-                                item: item,
-                                settings: settings,
-                                library: library,
-                                openFolder: { folder in self.openFolder = folder },
-                                launch: { app in
-                                    library.launch(app)
-                                    dismiss()
-                                }
-                            )
+                    ZStack(alignment: .top) {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                dismiss()
+                            }
+
+                        LazyVGrid(columns: gridColumns(for: settings), spacing: settings.verticalSpacing) {
+                            ForEach(filteredItems) { item in
+                                LauncherItemTile(
+                                    item: item,
+                                    settings: settings,
+                                    library: library,
+                                    openFolder: { folder in self.openFolder = folder },
+                                    launch: { app in
+                                        library.launch(app)
+                                        dismiss()
+                                    }
+                                )
+                            }
                         }
+                        .padding(.vertical, 6)
                     }
-                    .padding(.vertical, 6)
                 }
                 .frame(width: maxGridWidth, height: maxGridHeight)
                 .clipped()
@@ -354,6 +368,7 @@ private struct LauncherView: View {
                     maxGridHeight: maxGridHeight,
                     library: library,
                     openFolder: { folder in self.openFolder = folder },
+                    dismiss: dismiss,
                     launch: { app in
                         library.launch(app)
                         dismiss()
@@ -384,6 +399,7 @@ private final class LauncherSettingsController: ObservableObject {
     @Published private(set) var settings: LauncherSettings
 
     private var repository: SQLiteLauncherSettingsRepository?
+    private var persistTask: Task<Void, Never>?
 
     init() {
         do {
@@ -402,7 +418,30 @@ private final class LauncherSettingsController: ObservableObject {
         var next = settings
         transform(&next)
         settings = next.clamped()
+        schedulePersist()
+    }
+
+    deinit {
+        persistTask?.cancel()
+    }
+
+    func flush() {
+        persistTask?.cancel()
         persist()
+    }
+
+    private func schedulePersist() {
+        persistTask?.cancel()
+        let nextSettings = settings
+        let repository = repository
+        persistTask = Task {
+            try? await Task.sleep(for: .milliseconds(180))
+            do {
+                try repository?.save(nextSettings)
+            } catch {
+                NSLog("Failed to save launcher settings: \(error.localizedDescription)")
+            }
+        }
     }
 
     private func persist() {
@@ -435,101 +474,24 @@ private enum AppStoreFactory {
 
 private struct SettingsWindowView: View {
     @ObservedObject var controller: LauncherSettingsController
+    @State private var selectedSection: SettingsSection = .layout
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             Text("Glyphpad Settings")
                 .font(.system(size: 24, weight: .semibold))
 
+            Picker("Settings section", selection: $selectedSection) {
+                ForEach(SettingsSection.allCases, id: \.self) { section in
+                    Text(section.title).tag(section)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    settingsSection("Launcher") {
-                        Toggle("Auto arrange", isOn: Binding(
-                            get: { controller.settings.autoArrange },
-                            set: { value in controller.update { $0.autoArrange = value } }
-                        ))
-
-                        Stepper(value: Binding(
-                            get: { controller.settings.columns },
-                            set: { value in controller.update { $0.columns = value } }
-                        ), in: 4...12) {
-                            SettingValueLabel(title: "Columns", value: "\(controller.settings.clampedColumns)")
-                        }
-                        .disabled(controller.settings.autoArrange)
-
-                        Stepper(value: Binding(
-                            get: { controller.settings.rows },
-                            set: { value in controller.update { $0.rows = value } }
-                        ), in: 3...8) {
-                            SettingValueLabel(title: "Rows", value: "\(controller.settings.clampedRows)")
-                        }
-                        .disabled(controller.settings.autoArrange)
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            SettingValueLabel(title: "Icon size", value: "\(Int(controller.settings.clampedIconSize))")
-
-                            Slider(value: Binding(
-                                get: { Double(controller.settings.iconSize) },
-                                set: { value in controller.update { $0.iconSize = CGFloat(value) } }
-                            ), in: 48...112, step: 2)
-                        }
-
-                        Picker("Navigation", selection: Binding(
-                            get: { controller.settings.navigationMode },
-                            set: { value in controller.update { $0.navigationMode = value } }
-                        )) {
-                            Text("Vertical").tag(LauncherNavigationMode.verticalScroll)
-                            Text("Pages").tag(LauncherNavigationMode.horizontalPages)
-                        }
-                        .pickerStyle(.segmented)
-                    }
-
-                    settingsSection("Background") {
-                        HStack(spacing: 10) {
-                            Button("Choose Image") {
-                                chooseBackgroundImage()
-                            }
-
-                            Button("Clear") {
-                                controller.update { $0.backgroundImagePath = nil }
-                            }
-                            .disabled(controller.settings.backgroundImagePath == nil)
-                        }
-
-                        if let backgroundImagePath = controller.settings.backgroundImagePath {
-                            Text(backgroundImagePath)
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                                .truncationMode(.middle)
-                        }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            SettingValueLabel(
-                                title: "Blur",
-                                value: "\(Int(controller.settings.clampedBackgroundBlurRadius))"
-                            )
-
-                            Slider(value: Binding(
-                                get: { Double(controller.settings.backgroundBlurRadius) },
-                                set: { value in controller.update { $0.backgroundBlurRadius = CGFloat(value) } }
-                            ), in: 0...48, step: 1)
-                        }
-                    }
-
-                    settingsSection("API") {
-                        TextField("Endpoint", text: Binding(
-                            get: { controller.settings.apiEndpoint ?? "" },
-                            set: { value in controller.update { $0.apiEndpoint = value } }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-
-                        SecureField("API Key", text: Binding(
-                            get: { controller.settings.apiKey ?? "" },
-                            set: { value in controller.update { $0.apiKey = value } }
-                        ))
-                        .textFieldStyle(.roundedBorder)
-                    }
+                    selectedSectionContent
                 }
                 .padding(.trailing, 8)
             }
@@ -538,6 +500,112 @@ private struct SettingsWindowView: View {
         .controlSize(.regular)
         .padding(24)
         .frame(width: 560, height: 620)
+    }
+
+    @ViewBuilder
+    private var selectedSectionContent: some View {
+        switch selectedSection {
+        case .layout:
+            layoutSettings
+        case .appearance:
+            appearanceSettings
+        case .automation:
+            automationSettings
+        }
+    }
+
+    private var layoutSettings: some View {
+        settingsSection("Launcher") {
+            Toggle("Auto arrange", isOn: Binding(
+                get: { controller.settings.autoArrange },
+                set: { value in controller.update { $0.autoArrange = value } }
+            ))
+
+            Stepper(value: Binding(
+                get: { controller.settings.columns },
+                set: { value in controller.update { $0.columns = value } }
+            ), in: 4...12) {
+                SettingValueLabel(title: "Columns", value: "\(controller.settings.clampedColumns)")
+            }
+            .disabled(controller.settings.autoArrange)
+
+            Stepper(value: Binding(
+                get: { controller.settings.rows },
+                set: { value in controller.update { $0.rows = value } }
+            ), in: 3...8) {
+                SettingValueLabel(title: "Rows", value: "\(controller.settings.clampedRows)")
+            }
+            .disabled(controller.settings.autoArrange)
+
+            VStack(alignment: .leading, spacing: 8) {
+                SettingValueLabel(title: "Icon size", value: "\(Int(controller.settings.clampedIconSize))")
+
+                Slider(value: Binding(
+                    get: { Double(controller.settings.iconSize) },
+                    set: { value in controller.update { $0.iconSize = CGFloat(value) } }
+                ), in: 48...112, step: 2)
+            }
+
+            Picker("Navigation", selection: Binding(
+                get: { controller.settings.navigationMode },
+                set: { value in controller.update { $0.navigationMode = value } }
+            )) {
+                Text("Vertical").tag(LauncherNavigationMode.verticalScroll)
+                Text("Pages").tag(LauncherNavigationMode.horizontalPages)
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    private var appearanceSettings: some View {
+        settingsSection("Background") {
+            HStack(spacing: 10) {
+                Button("Choose Image") {
+                    chooseBackgroundImage()
+                }
+
+                Button("Clear") {
+                    controller.update { $0.backgroundImagePath = nil }
+                }
+                .disabled(controller.settings.backgroundImagePath == nil)
+            }
+
+            if let backgroundImagePath = controller.settings.backgroundImagePath {
+                Text(backgroundImagePath)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                SettingValueLabel(
+                    title: "Blur",
+                    value: "\(Int(controller.settings.clampedBackgroundBlurRadius))"
+                )
+
+                Slider(value: Binding(
+                    get: { Double(controller.settings.backgroundBlurRadius) },
+                    set: { value in controller.update { $0.backgroundBlurRadius = CGFloat(value) } }
+                ), in: 0...48, step: 1)
+            }
+        }
+    }
+
+    private var automationSettings: some View {
+        settingsSection("API") {
+            TextField("Endpoint", text: Binding(
+                get: { controller.settings.apiEndpoint ?? "" },
+                set: { value in controller.update { $0.apiEndpoint = value } }
+            ))
+            .textFieldStyle(.roundedBorder)
+
+            SecureField("API Key", text: Binding(
+                get: { controller.settings.apiKey ?? "" },
+                set: { value in controller.update { $0.apiKey = value } }
+            ))
+            .textFieldStyle(.roundedBorder)
+        }
     }
 
     @ViewBuilder
@@ -561,6 +629,23 @@ private struct SettingsWindowView: View {
 
         if panel.runModal() == .OK, let url = panel.url {
             controller.update { $0.backgroundImagePath = url.path }
+        }
+    }
+}
+
+private enum SettingsSection: CaseIterable {
+    case layout
+    case appearance
+    case automation
+
+    var title: String {
+        switch self {
+        case .layout:
+            return "Layout"
+        case .appearance:
+            return "Appearance"
+        case .automation:
+            return "API"
         }
     }
 }
@@ -657,6 +742,7 @@ private struct PagedLauncherGrid: View {
     let maxGridHeight: CGFloat
     @ObservedObject var library: ApplicationLibrary
     let openFolder: (FolderRecord) -> Void
+    let dismiss: () -> Void
     let launch: (InstalledApplication) -> Void
 
     private var pageSize: Int {
@@ -678,20 +764,28 @@ private struct PagedLauncherGrid: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 0) {
-                ForEach(Array(pages.enumerated()), id: \.offset) { _, page in
-                    LazyVGrid(columns: columns, spacing: settings.verticalSpacing) {
-                        ForEach(page) { item in
-                            LauncherItemTile(
-                                item: item,
-                                settings: settings,
-                                library: library,
-                                openFolder: openFolder,
-                                launch: launch
-                            )
-                        }
+            ZStack(alignment: .topLeading) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        dismiss()
                     }
-                    .frame(width: maxGridWidth, height: maxGridHeight, alignment: .top)
+
+                LazyHStack(spacing: 0) {
+                    ForEach(Array(pages.enumerated()), id: \.offset) { _, page in
+                        LazyVGrid(columns: columns, spacing: settings.verticalSpacing) {
+                            ForEach(page) { item in
+                                LauncherItemTile(
+                                    item: item,
+                                    settings: settings,
+                                    library: library,
+                                    openFolder: openFolder,
+                                    launch: launch
+                                )
+                            }
+                        }
+                        .frame(width: maxGridWidth, height: maxGridHeight, alignment: .top)
+                    }
                 }
             }
         }
@@ -708,17 +802,27 @@ private struct LauncherItemTile: View {
     let launch: (InstalledApplication) -> Void
 
     var body: some View {
+        tile
+            .draggable(item.id)
+            .dropDestination(for: String.self) { draggedIDs, location in
+                guard let draggedID = draggedIDs.first else {
+                    return false
+                }
+
+                return library.handleDrop(
+                    draggedItemID: draggedID,
+                    targetItemID: item.id,
+                    shouldCreateFolder: shouldCreateFolder(at: location)
+                )
+            }
+    }
+
+    @ViewBuilder
+    private var tile: some View {
         switch item {
         case .app(let app):
             AppTile(app: app, settings: settings) {
                 launch(app)
-            }
-            .draggable(app.id)
-            .dropDestination(for: String.self) { draggedIDs, _ in
-                guard let draggedID = draggedIDs.first else {
-                    return false
-                }
-                return library.createFolder(sourceAppID: draggedID, targetAppID: app.id) != nil
             }
         case .folder(let folder):
             FolderTile(
@@ -729,6 +833,17 @@ private struct LauncherItemTile: View {
                 openFolder(folder)
             }
         }
+    }
+
+    private func shouldCreateFolder(at location: CGPoint) -> Bool {
+        guard case .app = item else {
+            return false
+        }
+
+        let iconBandHeight = settings.clampedIconSize + 18
+        let iconLeft = (settings.tileWidth - settings.clampedIconSize) / 2
+        let iconRight = iconLeft + settings.clampedIconSize
+        return location.y <= iconBandHeight && location.x >= iconLeft && location.x <= iconRight
     }
 }
 
@@ -933,36 +1048,36 @@ private struct VisualEffectView: NSViewRepresentable {
 private final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
     @Published private(set) var apps: [InstalledApplication] = []
     @Published private(set) var folders: [FolderRecord] = []
+    @Published private(set) var launcherItems: [LauncherItem] = []
 
     private let iconCache = IconCache()
     private let appRepository: SQLiteAppRepository?
     private let folderRepository: SQLiteFolderRepository?
+    private let layoutRepository: SQLiteLayoutRepository?
     private var refreshTask: Task<Void, Never>?
     private var directoryWatcher: ApplicationDirectoryWatcher?
     private var appIndex: [String: InstalledApplication] = [:]
+    private var layoutOrder: [String] = []
 
     init() {
         do {
             let store = try AppStoreFactory.makeStore()
             self.appRepository = store.appRepository()
             self.folderRepository = store.folderRepository()
+            self.layoutRepository = store.layoutRepository()
         } catch {
             NSLog("Failed to open app cache store: \(error.localizedDescription)")
             self.appRepository = nil
             self.folderRepository = nil
+            self.layoutRepository = nil
         }
-    }
-
-    var launcherItems: [LauncherItem] {
-        let folderedIDs = Set(folders.flatMap(\.appBundleIdentifiers))
-        let visibleApps = apps.filter { !folderedIDs.contains($0.id) }
-        return folders.map(LauncherItem.folder) + visibleApps.map(LauncherItem.app)
     }
 
     func reload(reason: String = "manual") {
         startWatchingApplicationDirectories()
         let reloadStartedAt = PerformanceLog.start()
 
+        loadLayout()
         loadFolders()
         PerformanceLog.measure("library.cache.load", metadata: "reason=\(reason)") {
             loadCachedApps()
@@ -1013,6 +1128,25 @@ private final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         folder.appBundleIdentifiers.compactMap { appIndex[$0] }
     }
 
+    func handleDrop(draggedItemID: String, targetItemID: String, shouldCreateFolder: Bool) -> Bool {
+        guard draggedItemID != targetItemID else {
+            return false
+        }
+
+        if let targetFolderID = Self.folderID(from: targetItemID),
+           let draggedAppID = Self.appID(from: draggedItemID) {
+            return add(appID: draggedAppID, toFolderID: targetFolderID)
+        }
+
+        if shouldCreateFolder,
+           let sourceAppID = Self.appID(from: draggedItemID),
+           let targetAppID = Self.appID(from: targetItemID) {
+            return createFolder(sourceAppID: sourceAppID, targetAppID: targetAppID) != nil
+        }
+
+        return moveItem(draggedItemID: draggedItemID, before: targetItemID)
+    }
+
     func createFolder(sourceAppID: String, targetAppID: String) -> FolderRecord? {
         guard sourceAppID != targetAppID else {
             return nil
@@ -1030,12 +1164,17 @@ private final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         }
 
         do {
+            let insertIndex = launcherItems.firstIndex { $0.id == Self.layoutID(kind: .app, targetIdentifier: targetAppID) } ?? launcherItems.count
             let folder = try folderRepository?.create(
                 name: "Untitled Folder",
                 appBundleIdentifiers: [targetAppID, sourceAppID],
                 positionIndex: folders.count
             )
             loadFolders()
+            rebuildLauncherItems()
+            if let folder {
+                _ = moveItem(draggedItemID: Self.layoutID(kind: .folder, targetIdentifier: folder.id.uuidString), to: insertIndex)
+            }
             return folder
         } catch {
             NSLog("Failed to create folder: \(error.localizedDescription)")
@@ -1054,6 +1193,29 @@ private final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
             loadFolders()
         } catch {
             NSLog("Failed to rename folder: \(error.localizedDescription)")
+        }
+    }
+
+    private func add(appID: String, toFolderID folderID: UUID) -> Bool {
+        guard appIndex[appID] != nil else {
+            return false
+        }
+        guard let folder = folder(id: folderID), !folder.appBundleIdentifiers.contains(appID) else {
+            return false
+        }
+
+        do {
+            try folderRepository?.updateMembers(
+                folderID: folderID,
+                appBundleIdentifiers: folder.appBundleIdentifiers + [appID]
+            )
+            loadFolders()
+            rebuildLauncherItems()
+            saveCurrentLayout()
+            return true
+        } catch {
+            NSLog("Failed to add app to folder: \(error.localizedDescription)")
+            return false
         }
     }
 
@@ -1077,15 +1239,31 @@ private final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
     private func loadFolders() {
         do {
             folders = try folderRepository?.fetchAll() ?? []
+            rebuildLauncherItems()
         } catch {
             NSLog("Failed to load folders: \(error.localizedDescription)")
         }
     }
 
+    private func loadLayout() {
+        do {
+            layoutOrder = try layoutRepository?.fetchAll().map(Self.layoutID(for:)) ?? []
+        } catch {
+            NSLog("Failed to load launcher layout: \(error.localizedDescription)")
+            layoutOrder = []
+        }
+    }
+
     private func publish(_ scannedApps: [ScannedApplication]) {
-        setApps(scannedApps.map { app in
+        let nextApps = scannedApps.map { app in
             InstalledApplication(scannedApp: app, iconCache: iconCache)
-        })
+        }
+
+        guard appSignature(nextApps) != appSignature(apps) else {
+            return
+        }
+
+        setApps(nextApps)
     }
 
     private func persist(_ scannedApps: [ScannedApplication]) {
@@ -1094,9 +1272,22 @@ private final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         }
 
         do {
+            let existingRecords = Dictionary(
+                uniqueKeysWithValues: try appRepository.fetchAll().map { ($0.bundleIdentifier, $0) }
+            )
+            var changedCount = 0
             for app in scannedApps {
-                try appRepository.upsert(app.appRecord())
+                let nextRecord = app.appRecord()
+                if let existingRecord = existingRecords[nextRecord.bundleIdentifier],
+                   existingRecord.displayName == nextRecord.displayName,
+                   existingRecord.executablePath == nextRecord.executablePath {
+                    continue
+                }
+
+                try appRepository.upsert(nextRecord)
+                changedCount += 1
             }
+            NSLog("Glyphpad performance: library.persist.changed count=%d", changedCount)
         } catch {
             NSLog("Failed to persist app cache: \(error.localizedDescription)")
         }
@@ -1116,6 +1307,72 @@ private final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
 
         apps = dedupedApps
         appIndex = nextIndex
+        rebuildLauncherItems()
+    }
+
+    private func rebuildLauncherItems() {
+        let folderedIDs = Set(folders.flatMap(\.appBundleIdentifiers))
+        let baseItems: [LauncherItem] = folders.map(LauncherItem.folder)
+            + apps.filter { !folderedIDs.contains($0.id) }.map(LauncherItem.app)
+        let itemsByID = Dictionary(uniqueKeysWithValues: baseItems.map { ($0.id, $0) })
+        var usedIDs = Set<String>()
+
+        var orderedItems = layoutOrder.compactMap { id -> LauncherItem? in
+            guard let item = itemsByID[id], usedIDs.insert(id).inserted else {
+                return nil
+            }
+            return item
+        }
+        orderedItems += baseItems.filter { usedIDs.insert($0.id).inserted }
+
+        launcherItems = orderedItems
+    }
+
+    private func moveItem(draggedItemID: String, before targetItemID: String) -> Bool {
+        guard launcherItems.contains(where: { $0.id == targetItemID }) else {
+            return false
+        }
+
+        return moveItem(draggedItemID: draggedItemID, to: launcherItems.firstIndex { $0.id == targetItemID } ?? launcherItems.count)
+    }
+
+    private func moveItem(draggedItemID: String, to targetIndex: Int) -> Bool {
+        guard let sourceIndex = launcherItems.firstIndex(where: { $0.id == draggedItemID }) else {
+            return false
+        }
+
+        var items = launcherItems
+        let draggedItem = items.remove(at: sourceIndex)
+        let normalizedTargetIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
+        let insertIndex = min(max(normalizedTargetIndex, 0), items.count)
+        items.insert(draggedItem, at: insertIndex)
+
+        guard items != launcherItems else {
+            return false
+        }
+
+        launcherItems = items
+        saveCurrentLayout()
+        return true
+    }
+
+    private func saveCurrentLayout() {
+        layoutOrder = launcherItems.map(\.id)
+        do {
+            try layoutRepository?.replaceAll(launcherItems.enumerated().map { index, item in
+                LauncherLayoutRecord(
+                    kind: item.layoutKind,
+                    targetIdentifier: item.targetIdentifier,
+                    positionIndex: index
+                )
+            })
+        } catch {
+            NSLog("Failed to save launcher layout: \(error.localizedDescription)")
+        }
+    }
+
+    private func appSignature(_ apps: [InstalledApplication]) -> [String] {
+        apps.map { "\($0.id)|\($0.displayName)|\($0.url.path)" }
     }
 
     private func startWatchingApplicationDirectories() {
@@ -1127,6 +1384,33 @@ private final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
             Task { @MainActor [weak self] in
                 self?.reload(reason: "application-directory-change")
             }
+        }
+    }
+
+    private static func appID(from layoutID: String) -> String? {
+        guard layoutID.hasPrefix("app-") else {
+            return nil
+        }
+        return String(layoutID.dropFirst(4))
+    }
+
+    private static func folderID(from layoutID: String) -> UUID? {
+        guard layoutID.hasPrefix("folder-") else {
+            return nil
+        }
+        return UUID(uuidString: String(layoutID.dropFirst(7)))
+    }
+
+    private static func layoutID(for record: LauncherLayoutRecord) -> String {
+        layoutID(kind: record.kind, targetIdentifier: record.targetIdentifier)
+    }
+
+    private static func layoutID(kind: LauncherLayoutKind, targetIdentifier: String) -> String {
+        switch kind {
+        case .app:
+            return "app-\(targetIdentifier)"
+        case .folder:
+            return "folder-\(targetIdentifier)"
         }
     }
 }
@@ -1141,6 +1425,24 @@ private enum LauncherItem: Identifiable, Equatable {
             "folder-\(folder.id.uuidString)"
         case .app(let app):
             "app-\(app.id)"
+        }
+    }
+
+    var layoutKind: LauncherLayoutKind {
+        switch self {
+        case .folder:
+            return .folder
+        case .app:
+            return .app
+        }
+    }
+
+    var targetIdentifier: String {
+        switch self {
+        case .folder(let folder):
+            return folder.id.uuidString
+        case .app(let app):
+            return app.id
         }
     }
 }

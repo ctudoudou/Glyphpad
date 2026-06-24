@@ -45,6 +45,22 @@ final class SQLiteFolderRepositoryTests: XCTestCase {
         XCTAssertEqual(try repository.fetchAll()[0].name, "Design")
     }
 
+    func testUpdateMembersPersistsOrder() throws {
+        let repository = try makeStore().folderRepository()
+        let folder = try repository.create(
+            name: "Work",
+            appBundleIdentifiers: ["com.example.mail"],
+            positionIndex: 0
+        )
+
+        try repository.updateMembers(
+            folderID: folder.id,
+            appBundleIdentifiers: ["com.example.calendar", "com.example.mail", "com.example.calendar"]
+        )
+
+        XCTAssertEqual(try repository.fetchAll()[0].appBundleIdentifiers, ["com.example.calendar", "com.example.mail"])
+    }
+
     private func makeStore() throws -> GlyphpadStore {
         let path = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
