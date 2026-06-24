@@ -68,20 +68,22 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
     private func showLauncher() {
         let startedAt = PerformanceLog.start()
         let screen = NSScreen.main ?? NSScreen.screens.first
-        let frame = screen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let window = LauncherWindow(contentRect: frame)
+        let screenFrame = screen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let windowFrame = screenFrame.insetBy(dx: -2, dy: -2)
+        let window = LauncherWindow(contentRect: windowFrame)
         window.dismissHandler = { [weak self] in self?.dismissLauncher() }
 
         let rootView = LauncherView(settingsController: settingsController) { [weak self] in
             self?.dismissLauncher()
         }
 
-        let hostingView = NSHostingView(rootView: rootView)
-        hostingView.frame = NSRect(origin: .zero, size: frame.size)
+        let hostingView = EdgePinnedHostingView(rootView: rootView)
+        hostingView.frame = NSRect(origin: .zero, size: windowFrame.size)
         hostingView.autoresizingMask = [.width, .height]
         hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = NSColor.black.cgColor
         window.contentView = hostingView
-        window.setFrame(frame, display: true)
+        window.setFrame(windowFrame, display: true)
         window.alphaValue = 0
         window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
@@ -142,6 +144,7 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         settingsWindow.title = "Glyphpad Settings"
         settingsWindow.isReleasedWhenClosed = false
         settingsWindow.delegate = self
+        settingsWindow.level = .glyphpadSettingsPanel
         settingsWindow.center()
         settingsWindow.contentView = NSHostingView(rootView: SettingsWindowView(controller: settingsController))
         settingsWindow.makeKeyAndOrderFront(nil)
@@ -177,7 +180,7 @@ private final class LauncherWindow: NSWindow {
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
-        level = .mainMenu
+        level = .screenSaver
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .stationary]
         ignoresMouseEvents = false
         acceptsMouseMovedEvents = true
@@ -199,6 +202,21 @@ private final class LauncherWindow: NSWindow {
         }
 
         super.keyDown(with: event)
+    }
+}
+
+private extension NSWindow.Level {
+    static let glyphpadSettingsPanel = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+}
+
+private final class EdgePinnedHostingView<Content: View>: NSHostingView<Content> {
+    override var safeAreaInsets: NSEdgeInsets {
+        NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+    }
+
+    override var additionalSafeAreaInsets: NSEdgeInsets {
+        get { NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0) }
+        set {}
     }
 }
 
