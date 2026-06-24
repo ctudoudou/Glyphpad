@@ -18,6 +18,13 @@ private enum PageNavigationDirection: String {
     case next
 }
 
+private enum LauncherPresentationAnimation {
+    static let backdropIn = Animation.timingCurve(0.19, 1.0, 0.22, 1.0, duration: 0.22)
+    static let contentIn = Animation.timingCurve(0.19, 1.0, 0.22, 1.0, duration: 0.28)
+    static let backdropOut = Animation.timingCurve(0.4, 0.0, 1.0, 1.0, duration: 0.16)
+    static let contentOut = Animation.timingCurve(0.4, 0.0, 1.0, 1.0, duration: 0.14)
+}
+
 private enum PerformanceLog {
     static func start() -> TimeInterval {
         ProcessInfo.processInfo.systemUptime
@@ -130,7 +137,7 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         NSApplication.shared.activate(ignoringOtherApps: true)
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.18
+            context.duration = 0.22
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             window.animator().alphaValue = 1
         } completionHandler: {
@@ -156,8 +163,8 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         window.ignoresMouseEvents = true
         NotificationCenter.default.post(name: .glyphpadLauncherWillDismiss, object: window)
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.20
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.duration = 0.18
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
             window.animator().alphaValue = 0
         } completionHandler: {
             DispatchQueue.main.async {
@@ -487,7 +494,8 @@ private struct LauncherView: View {
     @StateObject private var library = ApplicationLibrary()
     @State private var searchText = ""
     @State private var openFolder: FolderRecord?
-    @State private var isPresented = false
+    @State private var isBackdropPresented = false
+    @State private var isContentPresented = false
 
     private var filteredItems: [LauncherItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -520,7 +528,7 @@ private struct LauncherView: View {
                     .onTapGesture {
                         dismiss()
                     }
-                    .opacity(isPresented ? 1 : 0)
+                    .opacity(isBackdropPresented ? 1 : 0)
 
                 VStack(spacing: 34) {
                     SearchField(text: $searchText)
@@ -532,9 +540,10 @@ private struct LauncherView: View {
                         .padding(.bottom, max(28, proxy.safeAreaInsets.bottom + 18))
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
-                .opacity(isPresented ? 1 : 0)
-                .scaleEffect(isPresented ? 1 : 0.965)
-                .blur(radius: isPresented ? 0 : 8)
+                .opacity(isContentPresented ? 1 : 0)
+                .scaleEffect(isContentPresented ? 1 : 1.018)
+                .blur(radius: isContentPresented ? 0 : 2)
+                .compositingGroup()
 
                 if let folder = openFolder {
                     FolderOverlay(
@@ -558,20 +567,27 @@ private struct LauncherView: View {
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
             .animation(.easeOut(duration: 0.18), value: openFolder?.id)
-            .animation(.smooth(duration: 0.24, extraBounce: 0.08), value: isPresented)
         }
         .ignoresSafeArea()
         .focusable()
         .onAppear {
             library.reload()
-            withAnimation(.smooth(duration: 0.24, extraBounce: 0.08)) {
-                isPresented = true
+            DispatchQueue.main.async {
+                withAnimation(LauncherPresentationAnimation.backdropIn) {
+                    isBackdropPresented = true
+                }
+                withAnimation(LauncherPresentationAnimation.contentIn) {
+                    isContentPresented = true
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .glyphpadLauncherWillDismiss)) { _ in
-            withAnimation(.easeInOut(duration: 0.16)) {
-                isPresented = false
+            withAnimation(LauncherPresentationAnimation.contentOut) {
+                isContentPresented = false
                 openFolder = nil
+            }
+            withAnimation(LauncherPresentationAnimation.backdropOut) {
+                isBackdropPresented = false
             }
         }
         .onExitCommand {
