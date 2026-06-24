@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import Darwin
 import GlyphpadCore
 import GlyphpadStorage
@@ -50,9 +51,11 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
     private var window: LauncherWindow?
     private var settingsWindow: NSWindow?
     private let settingsController = LauncherSettingsController()
+    private var hotKeyManager: GlobalHotKeyManager?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installMenu()
+        installGlobalHotKey()
         NSApplication.shared.presentationOptions = [.autoHideDock, .autoHideMenuBar]
         NotificationCenter.default.addObserver(
             forName: .glyphpadToggleSettings,
@@ -70,7 +73,22 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         settingsController.flush()
     }
 
+    private func toggleLauncher() {
+        if window != nil {
+            dismissLauncher()
+        } else {
+            showLauncher()
+        }
+    }
+
     private func showLauncher() {
+        if let window {
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            return
+        }
+
         let startedAt = PerformanceLog.start()
         let screen = NSScreen.main ?? NSScreen.screens.first
         let screenFrame = screen?.frame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
@@ -113,7 +131,6 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         let startedAt = PerformanceLog.start()
         guard let window else {
             PerformanceLog.finish("launcher.close.no-window", startedAt: startedAt)
-            NSApplication.shared.terminate(nil)
             return
         }
 
@@ -129,7 +146,7 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
                     return
                 }
                 self.settingsController.flush()
-                NSApplication.shared.terminate(nil)
+                NSApplication.shared.hide(nil)
             }
         }
     }
@@ -171,8 +188,16 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         settingsWindow = nil
         if window == nil {
             settingsController.flush()
-            NSApplication.shared.terminate(nil)
         }
+    }
+
+    private func installGlobalHotKey() {
+        hotKeyManager = GlobalHotKeyManager {
+            Task { @MainActor [weak self] in
+                self?.toggleLauncher()
+            }
+        }
+        hotKeyManager?.registerDefaultHotKey()
     }
 
     private func installMenu() {
@@ -201,6 +226,89 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         mainMenu.addItem(appMenuItem)
         NSApplication.shared.mainMenu = mainMenu
     }
+}
+
+private final class GlobalHotKeyManager {
+    private var hotKeyRef: EventHotKeyRef?
+    private var eventHandlerRef: EventHandlerRef?
+    private let action: @Sendable () -> Void
+
+    init(action: @escaping @Sendable () -> Void) {
+        self.action = action
+    }
+
+    deinit {
+        if let hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+        }
+        if let eventHandlerRef {
+            RemoveEventHandler(eventHandlerRef)
+        }
+    }
+
+    func registerDefaultHotKey() {
+        let eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
+
+        let userData = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        let installStatus = InstallEventHandler(
+            GetApplicationEventTarget(),
+            { _, eventRef, userData in
+                guard let userData else {
+                    return noErr
+                }
+
+                var hotKeyID = EventHotKeyID()
+                let result = GetEventParameter(
+                    eventRef,
+                    EventParamName(kEventParamDirectObject),
+                    EventParamType(typeEventHotKeyID),
+                    nil,
+                    MemoryLayout<EventHotKeyID>.size,
+                    nil,
+                    &hotKeyID
+                )
+                guard result == noErr, hotKeyID.id == 1 else {
+                    return noErr
+                }
+
+                let manager = Unmanaged<GlobalHotKeyManager>.fromOpaque(userData).takeUnretainedValue()
+                manager.action()
+                return noErr
+            },
+            1,
+            [eventType],
+            userData,
+            &eventHandlerRef
+        )
+        guard installStatus == noErr else {
+            NSLog("Failed to install Glyphpad hot key handler: \(installStatus)")
+            return
+        }
+
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: 1)
+        let registerStatus = RegisterEventHotKey(
+            UInt32(kVK_Space),
+            UInt32(optionKey),
+            hotKeyID,
+            GetApplicationEventTarget(),
+            0,
+            &hotKeyRef
+        )
+        if registerStatus != noErr {
+            NSLog("Failed to register Glyphpad global hot key: \(registerStatus)")
+        }
+    }
+
+    private static let signature: OSType = {
+        var result: OSType = 0
+        for scalar in "GLYP".unicodeScalars {
+            result = (result << 8) + OSType(scalar.value)
+        }
+        return result
+    }()
 }
 
 private final class LauncherWindow: NSWindow {
@@ -256,6 +364,7 @@ private final class LauncherWindow: NSWindow {
 
 private extension NSWindow.Level {
     static let glyphpadSettingsPanel = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
+    static let glyphpadModalPanel = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 2)
 }
 
 private final class EdgePinnedHostingView<Content: View>: NSHostingView<Content> {
@@ -683,6 +792,20 @@ private struct SettingsWindowView: View {
 
                 LayoutPreview(settings: controller.settings)
             }
+
+            SettingsGroup(title: "Keyboard", subtitle: "Keep Glyphpad ready without showing a Dock icon.") {
+                HStack(spacing: 16) {
+                    SettingFieldLabel(
+                        title: "Show or hide launcher",
+                        detail: "Glyphpad stays in the background after closing the launcher."
+                    )
+                    Spacer()
+                    HStack(spacing: 5) {
+                        KeyCap("Option")
+                        KeyCap("Space")
+                    }
+                }
+            }
         }
     }
 
@@ -766,6 +889,9 @@ private struct SettingsWindowView: View {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
+        panel.level = .glyphpadModalPanel
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        NSApplication.shared.activate(ignoringOtherApps: true)
 
         if panel.runModal() == .OK, let url = panel.url {
             controller.update { $0.backgroundImagePath = url.path }
@@ -915,6 +1041,27 @@ private struct SettingFieldLabel: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+private struct KeyCap: View {
+    let label: String
+
+    init(_ label: String) {
+        self.label = label
+    }
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 9)
+            .frame(height: 26)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+            }
     }
 }
 
@@ -1162,6 +1309,7 @@ private struct PagedLauncherGrid: View {
     let openFolder: (FolderRecord) -> Void
     let dismiss: () -> Void
     let launch: (InstalledApplication) -> Void
+    @State private var currentPageID: Int?
 
     private var pageSize: Int {
         settings.clampedColumns * settings.clampedRows
@@ -1190,7 +1338,7 @@ private struct PagedLauncherGrid: View {
                     }
 
                 LazyHStack(spacing: 0) {
-                    ForEach(Array(pages.enumerated()), id: \.offset) { _, page in
+                    ForEach(Array(pages.enumerated()), id: \.offset) { pageIndex, page in
                         LazyVGrid(columns: columns, spacing: settings.verticalSpacing) {
                             ForEach(page) { item in
                                 LauncherItemTile(
@@ -1203,12 +1351,21 @@ private struct PagedLauncherGrid: View {
                             }
                         }
                         .frame(width: maxGridWidth, height: maxGridHeight, alignment: .top)
+                        .id(pageIndex)
+                        .scrollTransition(.interactive, axis: .horizontal) { content, phase in
+                            content
+                                .scaleEffect(1 - min(abs(phase.value) * 0.045, 0.045))
+                                .opacity(1 - min(abs(phase.value) * 0.16, 0.16))
+                                .offset(x: phase.value * -18)
+                        }
                     }
                 }
                 .scrollTargetLayout()
             }
         }
         .scrollTargetBehavior(.paging)
+        .scrollPosition(id: $currentPageID)
+        .animation(.smooth(duration: 0.38, extraBounce: 0.16), value: currentPageID)
         .frame(width: maxGridWidth, height: maxGridHeight)
         .clipped()
     }
@@ -1223,18 +1380,17 @@ private struct LauncherItemTile: View {
 
     var body: some View {
         tile
-            .draggable(item.id)
-            .dropDestination(for: String.self) { draggedIDs, location in
-                guard let draggedID = draggedIDs.first else {
-                    return false
-                }
-
-                return library.handleDrop(
-                    draggedItemID: draggedID,
-                    targetItemID: item.id,
-                    shouldCreateFolder: shouldCreateFolder(at: location)
-                )
+            .onDrag {
+                NSItemProvider(object: item.id as NSString)
             }
+            .onDrop(
+                of: [UTType.text],
+                delegate: LauncherItemDropDelegate(
+                    targetItemID: item.id,
+                    targetIsApp: item.isApp,
+                    library: library
+                )
+            )
     }
 
     @ViewBuilder
@@ -1255,20 +1411,42 @@ private struct LauncherItemTile: View {
         }
     }
 
-    private func shouldCreateFolder(at location: CGPoint) -> Bool {
-        guard case .app = item else {
+}
+
+private struct LauncherItemDropDelegate: DropDelegate {
+    let targetItemID: String
+    let targetIsApp: Bool
+    @ObservedObject var library: ApplicationLibrary
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [UTType.text])
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let provider = info.itemProviders(for: [UTType.text]).first else {
             return false
         }
 
-        let iconBandHeight = settings.clampedIconSize + 18
-        let iconLeft = (settings.tileWidth - settings.clampedIconSize) / 2
-        let iconRight = iconLeft + settings.clampedIconSize
-        return location.y <= iconBandHeight && location.x >= iconLeft && location.x <= iconRight
+        provider.loadObject(ofClass: NSString.self) { object, _ in
+            guard let draggedItemID = object as? String else {
+                return
+            }
+
+            Task { @MainActor in
+                _ = library.handleDrop(
+                    draggedItemID: draggedItemID,
+                    targetItemID: targetItemID,
+                    shouldCreateFolder: targetIsApp
+                )
+            }
+        }
+        return true
     }
 }
 
 private struct SearchField: View {
     @Binding var text: String
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         HStack(spacing: 12) {
@@ -1280,6 +1458,7 @@ private struct SearchField: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 20, weight: .medium))
                 .foregroundStyle(.white)
+                .focused($isFocused)
         }
         .padding(.horizontal, 20)
         .frame(width: 420, height: 46)
@@ -1287,6 +1466,11 @@ private struct SearchField: View {
         .overlay {
             Capsule()
                 .stroke(.white.opacity(0.20), lineWidth: 1)
+        }
+        .onAppear {
+            DispatchQueue.main.async {
+                isFocused = true
+            }
         }
     }
 }
@@ -1878,6 +2062,13 @@ private enum LauncherItem: Identifiable, Equatable {
         case .app(let app):
             return app.id
         }
+    }
+
+    var isApp: Bool {
+        if case .app = self {
+            return true
+        }
+        return false
     }
 }
 
