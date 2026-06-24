@@ -222,10 +222,7 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         }
 
         do {
-            try folderRepository?.updateMembers(
-                folderID: folderID,
-                appBundleIdentifiers: folder.appBundleIdentifiers + [appID]
-            )
+            try writeFolderMembers(folderID: folderID, appBundleIdentifiers: folder.appBundleIdentifiers + [appID])
             loadFolders()
             rebuildLauncherItems()
             saveCurrentLayout()
@@ -261,11 +258,11 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
             }
 
             do {
-                try folderRepository?.updateMembers(
+                try writeFolderMembers(
                     folderID: sourceFolderID,
                     appBundleIdentifiers: sourceFolder.appBundleIdentifiers.filter { $0 != appID }
                 )
-                try folderRepository?.updateMembers(
+                try writeFolderMembers(
                     folderID: targetFolderID,
                     appBundleIdentifiers: targetFolder.appBundleIdentifiers + [appID]
                 )
@@ -309,7 +306,7 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         }
 
         do {
-            try folderRepository?.updateMembers(
+            try writeFolderMembers(
                 folderID: sourceFolderID,
                 appBundleIdentifiers: sourceFolder.appBundleIdentifiers.filter { $0 != appID }
             )
@@ -337,6 +334,17 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         } catch {
             NSLog("Failed to move app out of folder: \(error.localizedDescription)")
             return false
+        }
+    }
+
+    private func writeFolderMembers(folderID: UUID, appBundleIdentifiers: [String]) throws {
+        if appBundleIdentifiers.isEmpty {
+            try folderRepository?.delete(folderID: folderID)
+        } else {
+            try folderRepository?.updateMembers(
+                folderID: folderID,
+                appBundleIdentifiers: appBundleIdentifiers
+            )
         }
     }
 
@@ -447,7 +455,6 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         orderedItems += baseItems.filter { usedIDs.insert($0.id).inserted }
 
         launcherItems = orderedItems
-        persistLayoutIfNeeded(for: orderedItems)
     }
 
     private func moveItem(draggedItemID: String, before targetItemID: String) -> Bool {
@@ -480,15 +487,6 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
 
     private func saveCurrentLayout() {
         saveLayout(for: launcherItems)
-    }
-
-    private func persistLayoutIfNeeded(for items: [LauncherItem]) {
-        let nextLayoutOrder = items.map(\.id)
-        guard !nextLayoutOrder.isEmpty, nextLayoutOrder != layoutOrder else {
-            return
-        }
-
-        saveLayout(for: items)
     }
 
     private func saveLayout(for items: [LauncherItem]) {

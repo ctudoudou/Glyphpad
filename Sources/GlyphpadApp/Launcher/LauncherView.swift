@@ -234,10 +234,12 @@ struct LauncherView: View {
         guard let target = dragTarget(at: location), target.item.id != item.id else {
             if let sourceFolderID, item.isApp {
                 withAnimation(.easeOut(duration: 0.16)) {
-                    _ = library.moveAppOutOfFolder(
+                    if library.moveAppOutOfFolder(
                         draggedItemID: item.id,
                         sourceFolderID: sourceFolderID
-                    )
+                    ) {
+                        openFolder = library.folder(id: sourceFolderID)
+                    }
                 }
             }
             return
@@ -253,13 +255,16 @@ struct LauncherView: View {
         let placement: LauncherDropPlacement = localLocation.x >= target.frame.width / 2 ? .after : .before
 
         withAnimation(.easeOut(duration: 0.16)) {
-            _ = library.handleInternalDrop(
+            let didDrop = library.handleInternalDrop(
                 draggedItemID: item.id,
                 sourceFolderID: sourceFolderID,
                 targetItemID: target.item.id,
                 shouldCreateFolder: sourceFolderID == nil && shouldCreateFolder,
                 placement: placement
             )
+            if didDrop, let sourceFolderID {
+                openFolder = library.folder(id: sourceFolderID)
+            }
         }
     }
 
