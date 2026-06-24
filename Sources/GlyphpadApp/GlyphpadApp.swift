@@ -167,6 +167,8 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
     }
 
     private func showSettingsWindow() {
+        removeLauncherWindowForSettings()
+
         if let settingsWindow {
             settingsWindow.makeKeyAndOrderFront(nil)
             NSApplication.shared.activate(ignoringOtherApps: true)
@@ -182,13 +184,26 @@ private final class LauncherAppDelegate: NSObject, NSApplicationDelegate, NSWind
         settingsWindow.title = "Glyphpad Settings"
         settingsWindow.isReleasedWhenClosed = false
         settingsWindow.delegate = self
-        settingsWindow.level = .glyphpadSettingsPanel
+        settingsWindow.level = .floating
         settingsWindow.minSize = NSSize(width: 700, height: 520)
         settingsWindow.center()
         settingsWindow.contentView = NSHostingView(rootView: SettingsWindowView(controller: settingsController))
         settingsWindow.makeKeyAndOrderFront(nil)
         self.settingsWindow = settingsWindow
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    private func removeLauncherWindowForSettings() {
+        guard let window else {
+            return
+        }
+
+        window.ignoresMouseEvents = true
+        window.alphaValue = 0
+        window.orderOut(nil)
+        window.close()
+        self.window = nil
+        isDismissingLauncher = false
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -371,11 +386,6 @@ private final class LauncherWindow: NSWindow {
 
         return super.performKeyEquivalent(with: event)
     }
-}
-
-private extension NSWindow.Level {
-    static let glyphpadSettingsPanel = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 1)
-    static let glyphpadModalPanel = NSWindow.Level(rawValue: NSWindow.Level.screenSaver.rawValue + 2)
 }
 
 private final class EdgePinnedHostingView<Content: View>: NSHostingView<Content> {
@@ -900,12 +910,22 @@ private struct SettingsWindowView: View {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
-        panel.level = .glyphpadModalPanel
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         NSApplication.shared.activate(ignoringOtherApps: true)
 
-        if panel.runModal() == .OK, let url = panel.url {
+        let responseHandler: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let url = panel.url else {
+                return
+            }
             controller.update { $0.backgroundImagePath = url.path }
+        }
+
+        if let settingsWindow = NSApplication.shared.windows.first(where: { window in
+            window.title == "Glyphpad Settings" && window.isVisible
+        }) {
+            settingsWindow.makeKeyAndOrderFront(nil)
+            panel.beginSheetModal(for: settingsWindow, completionHandler: responseHandler)
+        } else {
+            panel.begin(completionHandler: responseHandler)
         }
     }
 
