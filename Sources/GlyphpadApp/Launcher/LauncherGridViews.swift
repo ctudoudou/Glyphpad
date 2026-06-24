@@ -271,25 +271,8 @@ struct FolderTile: View {
 
     var body: some View {
         VStack(spacing: 9) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(.white.opacity(0.14))
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.fixed(settings.clampedIconSize * 0.28), spacing: 4), count: 2),
-                    spacing: 4
-                ) {
-                    ForEach(memberApps.prefix(4)) { app in
-                        Image(nsImage: app.icon)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: settings.clampedIconSize * 0.28, height: settings.clampedIconSize * 0.28)
-                    }
-                }
-            }
-            .frame(width: settings.clampedIconSize, height: settings.clampedIconSize)
-            .shadow(color: .black.opacity(0.26), radius: 10, x: 0, y: 6)
+            FolderIconPreview(memberApps: memberApps, size: settings.clampedIconSize)
+                .shadow(color: .black.opacity(0.26), radius: 10, x: 0, y: 6)
 
             Text(folder.name)
                 .font(.system(size: 13, weight: .medium))
@@ -303,6 +286,66 @@ struct FolderTile: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: open)
         .help(folder.name)
+    }
+}
+
+struct FolderIconPreview: View {
+    let memberApps: [InstalledApplication]
+    let size: CGFloat
+
+    private var visibleApps: [InstalledApplication] {
+        Array(memberApps.prefix(4))
+    }
+
+    private var iconSize: CGFloat {
+        size * 0.30
+    }
+
+    private var spacing: CGFloat {
+        max(4, size * 0.07)
+    }
+
+    private var cornerRadius: CGFloat {
+        max(18, size * 0.25)
+    }
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(.white.opacity(0.13))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.fixed(iconSize), spacing: spacing), count: 2),
+                spacing: spacing
+            ) {
+                ForEach(0..<4, id: \.self) { index in
+                    previewCell(at: index)
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .overlay {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(.white.opacity(0.14), lineWidth: 1)
+        }
+        .compositingGroup()
+    }
+
+    @ViewBuilder
+    private func previewCell(at index: Int) -> some View {
+        if index < visibleApps.count {
+            Image(nsImage: visibleApps[index].icon)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: iconSize, height: iconSize)
+                .clipShape(RoundedRectangle(cornerRadius: max(5, iconSize * 0.22), style: .continuous))
+        } else {
+            RoundedRectangle(cornerRadius: max(5, iconSize * 0.22), style: .continuous)
+                .fill(.white.opacity(memberApps.isEmpty ? 0.16 : 0.08))
+                .frame(width: iconSize, height: iconSize)
+        }
     }
 }
 
