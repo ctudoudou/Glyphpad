@@ -1,7 +1,7 @@
 import Foundation
 
 public final class GlyphpadStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 4
 
     private let database: SQLiteDatabase
 
@@ -12,6 +12,18 @@ public final class GlyphpadStore: @unchecked Sendable {
 
     public func appRepository() -> SQLiteAppRepository {
         SQLiteAppRepository(database: database)
+    }
+
+    public func launcherSettingsRepository() -> SQLiteLauncherSettingsRepository {
+        SQLiteLauncherSettingsRepository(database: database)
+    }
+
+    public func folderRepository() -> SQLiteFolderRepository {
+        SQLiteFolderRepository(database: database)
+    }
+
+    public func layoutRepository() -> SQLiteLayoutRepository {
+        SQLiteLayoutRepository(database: database)
     }
 
     private func migrate() throws {
@@ -44,7 +56,16 @@ public final class GlyphpadStore: @unchecked Sendable {
                 id TEXT PRIMARY KEY NOT NULL,
                 name TEXT NOT NULL,
                 page_index INTEGER NOT NULL,
-                position_index INTEGER NOT NULL
+                position_index INTEGER NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS folder_members (
+                folder_id TEXT NOT NULL,
+                app_bundle_identifier TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                PRIMARY KEY(folder_id, app_bundle_identifier),
+                FOREIGN KEY(folder_id) REFERENCES folders(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS layout_items (
@@ -69,10 +90,30 @@ public final class GlyphpadStore: @unchecked Sendable {
                 FOREIGN KEY(app_id) REFERENCES apps(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS launcher_settings (
+                id TEXT PRIMARY KEY NOT NULL,
+                columns INTEGER NOT NULL,
+                rows INTEGER NOT NULL,
+                icon_size REAL NOT NULL,
+                auto_arrange INTEGER NOT NULL,
+                navigation_mode TEXT NOT NULL,
+                background_image_path TEXT,
+                background_blur_radius REAL NOT NULL DEFAULT 18,
+                api_endpoint TEXT,
+                api_key TEXT,
+                updated_at TEXT NOT NULL
+            );
+
             INSERT INTO schema_metadata(key, value)
             VALUES ('schema_version', '\(Self.currentSchemaVersion)')
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             """
         )
+
+        try? database.execute("ALTER TABLE folders ADD COLUMN updated_at TEXT NOT NULL DEFAULT '';")
+        try? database.execute("ALTER TABLE launcher_settings ADD COLUMN background_image_path TEXT;")
+        try? database.execute("ALTER TABLE launcher_settings ADD COLUMN background_blur_radius REAL NOT NULL DEFAULT 18;")
+        try? database.execute("ALTER TABLE launcher_settings ADD COLUMN api_endpoint TEXT;")
+        try? database.execute("ALTER TABLE launcher_settings ADD COLUMN api_key TEXT;")
     }
 }
