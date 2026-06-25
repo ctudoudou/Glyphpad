@@ -23,3 +23,7 @@ The top-level README copy should sell Glyphpad as a small, native, familiar Laun
 ## Launchpad Restoration Framing
 
 The README leads with Apple removing Launchpad and Glyphpad bringing the experience back in an open, native, fast, roughly 3 MB package. This matches the product story while keeping implementation claims grounded in the current app.
+
+## Chinese README As Source
+
+The user-written Chinese README is the source of truth for structure and message. The English README follows that shape while using natural English product copy.

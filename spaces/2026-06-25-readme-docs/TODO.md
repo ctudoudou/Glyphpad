@@ -9,3 +9,4 @@
 - [x] Highlight the roughly 3 MB app size and make README copy more engaging.
 - [x] Rewrite README copy in a more conversational product-sales tone.
 - [x] Reframe README copy around Apple removing Launchpad and Glyphpad bringing it back.
+- [x] Align the English README with the user-written Chinese README.
