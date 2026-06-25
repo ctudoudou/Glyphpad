@@ -33,6 +33,7 @@ Glyphpad keeps the classic full-screen grid, search, folders, pages, and drag so
 - **Folders and sorting are saved**: drag apps around, create folders, move apps in and out, and Glyphpad remembers the layout.
 - **No empty-folder graveyard**: empty folders clean themselves up.
 - **Classic or compact**: use horizontal pages for the Launchpad rhythm, or vertical scrolling when you have a lot of apps.
+- **Custom Launchpad background**: use your own image and tune the blur so it feels like your launcher, not a rented screen.
 - **Make it yours**: tune rows, columns, icon size, background image, blur strength, and auto-arrange behavior.
 - **Global hot key**: summon it with one shortcut, or change the shortcut to your own.
 - **Local-first by default**: app metadata, layout, folders, settings, and future classification history stay in SQLite on your Mac.
