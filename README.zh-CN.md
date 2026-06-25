@@ -4,6 +4,7 @@
 
 ![版本](https://img.shields.io/badge/version-1.0.0-blue)
 
+> [!NOTE]
 > Apple 让 Launchpad 消失了, Glyphpad 想用开源的方式把它带回来。
 
 </div>
