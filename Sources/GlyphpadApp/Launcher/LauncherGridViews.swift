@@ -9,6 +9,42 @@ struct LauncherInternalDragState: Equatable {
     let sourceFolderID: UUID?
 }
 
+struct LauncherDragVisualState: Equatable {
+    let activeItemID: String?
+    let mergeTargetItemID: String?
+    let reorderTargetItemID: String?
+
+    static let inactive = LauncherDragVisualState(
+        activeItemID: nil,
+        mergeTargetItemID: nil,
+        reorderTargetItemID: nil
+    )
+
+    var isMergeCandidate: Bool {
+        mergeTargetItemID != nil
+    }
+
+    func role(for itemID: String) -> LauncherDragRole {
+        if itemID == activeItemID {
+            return .active
+        }
+        if itemID == mergeTargetItemID {
+            return .mergeTarget
+        }
+        if itemID == reorderTargetItemID {
+            return .reorderTarget
+        }
+        return .inactive
+    }
+}
+
+enum LauncherDragRole {
+    case inactive
+    case active
+    case mergeTarget
+    case reorderTarget
+}
+
 struct LauncherItemFramePreferenceKey: PreferenceKey {
     static let defaultValue: [String: CGRect] = [:]
 
@@ -27,7 +63,7 @@ struct PagedLauncherGrid: View {
     let dismiss: () -> Void
     let launch: (InstalledApplication) -> Void
     @Binding var currentPageID: Int?
-    let activeDragItemID: String?
+    let dragVisualState: LauncherDragVisualState
     let onInternalDragChanged: (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void
     let onInternalDragEnded: (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void
 
@@ -71,7 +107,7 @@ struct PagedLauncherGrid: View {
                                     library: library,
                                     openFolder: openFolder,
                                     launch: launch,
-                                    activeDragItemID: activeDragItemID,
+                                    dragVisualState: dragVisualState,
                                     onInternalDragChanged: onInternalDragChanged,
                                     onInternalDragEnded: onInternalDragEnded
                                 )
@@ -128,15 +164,24 @@ struct LauncherItemTile: View {
     @ObservedObject var library: ApplicationLibrary
     let openFolder: (FolderRecord) -> Void
     let launch: (InstalledApplication) -> Void
-    let activeDragItemID: String?
+    let dragVisualState: LauncherDragVisualState
     let onInternalDragChanged: (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void
     let onInternalDragEnded: (LauncherItem, LauncherSettings, CGPoint, UUID?) -> Void
+
+    private var dragRole: LauncherDragRole {
+        dragVisualState.role(for: item.id)
+    }
 
     var body: some View {
         tile
             .contentShape(Rectangle())
-            .opacity(activeDragItemID == item.id ? 0.42 : 1)
-            .scaleEffect(activeDragItemID == item.id ? 0.94 : 1)
+            .opacity(tileOpacity)
+            .scaleEffect(tileScale)
+            .offset(y: tileOffsetY)
+            .shadow(color: tileShadowColor, radius: tileShadowRadius, x: 0, y: tileShadowY)
+            .overlay(alignment: .topTrailing) {
+                dragFeedbackOverlay
+            }
             .background {
                 GeometryReader { proxy in
                     Color.clear.preference(
@@ -146,7 +191,7 @@ struct LauncherItemTile: View {
                 }
             }
             .highPriorityGesture(internalDragGesture)
-            .animation(.easeOut(duration: 0.12), value: activeDragItemID)
+            .animation(.spring(response: 0.22, dampingFraction: 0.72), value: dragVisualState)
     }
 
     private var internalDragGesture: some Gesture {
@@ -157,6 +202,90 @@ struct LauncherItemTile: View {
             .onEnded { value in
                 onInternalDragEnded(item, settings, value.location, nil)
             }
+    }
+
+    private var tileOpacity: Double {
+        switch dragRole {
+        case .active:
+            return 0.26
+        case .inactive, .mergeTarget, .reorderTarget:
+            return 1
+        }
+    }
+
+    private var tileScale: CGFloat {
+        switch dragRole {
+        case .active:
+            return 0.88
+        case .mergeTarget:
+            return 1.12
+        case .reorderTarget:
+            return 1.035
+        case .inactive:
+            return 1
+        }
+    }
+
+    private var tileOffsetY: CGFloat {
+        dragRole == .reorderTarget ? -5 : 0
+    }
+
+    private var tileShadowColor: Color {
+        switch dragRole {
+        case .mergeTarget:
+            return .white.opacity(0.42)
+        case .reorderTarget:
+            return .white.opacity(0.18)
+        case .active, .inactive:
+            return .clear
+        }
+    }
+
+    private var tileShadowRadius: CGFloat {
+        switch dragRole {
+        case .mergeTarget:
+            return 24
+        case .reorderTarget:
+            return 12
+        case .active, .inactive:
+            return 0
+        }
+    }
+
+    private var tileShadowY: CGFloat {
+        dragRole == .mergeTarget ? 10 : 4
+    }
+
+    @ViewBuilder
+    private var dragFeedbackOverlay: some View {
+        switch dragRole {
+        case .mergeTarget:
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(.white.opacity(0.10))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .stroke(.white.opacity(0.58), lineWidth: 1.4)
+                    }
+                    .frame(width: settings.tileWidth + 18, height: settings.tileHeight + 12)
+                    .allowsHitTesting(false)
+
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.black.opacity(0.78))
+                    .frame(width: 24, height: 24)
+                    .background(.white.opacity(0.92), in: Circle())
+                    .shadow(color: .black.opacity(0.24), radius: 8, x: 0, y: 4)
+                    .offset(x: 8, y: -8)
+            }
+        case .reorderTarget:
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(.white.opacity(0.30), lineWidth: 1)
+                .frame(width: settings.tileWidth + 12, height: settings.tileHeight + 8)
+                .allowsHitTesting(false)
+        case .active, .inactive:
+            EmptyView()
+        }
     }
 
     @ViewBuilder
@@ -183,6 +312,7 @@ struct LauncherDragPreview: View {
     let item: LauncherItem
     let settings: LauncherSettings
     @ObservedObject var library: ApplicationLibrary
+    let isMergeCandidate: Bool
 
     var body: some View {
         Group {
@@ -197,9 +327,15 @@ struct LauncherDragPreview: View {
                 ) {}
             }
         }
-        .scaleEffect(1.05)
-        .opacity(0.92)
-        .shadow(color: .black.opacity(0.34), radius: 18, x: 0, y: 10)
+        .scaleEffect(isMergeCandidate ? 1.16 : 1.05)
+        .opacity(isMergeCandidate ? 0.98 : 0.92)
+        .shadow(
+            color: isMergeCandidate ? .white.opacity(0.38) : .black.opacity(0.34),
+            radius: isMergeCandidate ? 24 : 18,
+            x: 0,
+            y: isMergeCandidate ? 12 : 10
+        )
+        .animation(.spring(response: 0.22, dampingFraction: 0.70), value: isMergeCandidate)
     }
 }
 

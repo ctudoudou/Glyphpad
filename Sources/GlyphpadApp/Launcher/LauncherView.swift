@@ -89,10 +89,12 @@ struct LauncherView: View {
                 }
 
                 if let dragState {
+                    let visualState = dragVisualState(for: dragState.settings)
                     LauncherDragPreview(
                         item: dragState.item,
                         settings: dragState.settings,
-                        library: library
+                        library: library,
+                        isMergeCandidate: visualState.isMergeCandidate
                     )
                     .position(dragState.location)
                     .allowsHitTesting(false)
@@ -136,6 +138,7 @@ struct LauncherView: View {
     @ViewBuilder
     private func launcherContent(maxSize: CGSize) -> some View {
         let settings = settingsController.settings.fitting(maxSize: maxSize)
+        let dragVisualState = dragVisualState(for: settings)
         let maxGridWidth = min(
             maxSize.width - 96,
             CGFloat(settings.clampedColumns) * settings.tileWidth
@@ -175,7 +178,7 @@ struct LauncherView: View {
                                         library.launch(app)
                                         dismiss()
                                     },
-                                    activeDragItemID: dragState?.item.id,
+                                    dragVisualState: dragVisualState,
                                     onInternalDragChanged: updateInternalDrag,
                                     onInternalDragEnded: finishInternalDrag
                                 )
@@ -200,7 +203,7 @@ struct LauncherView: View {
                         dismiss()
                     },
                     currentPageID: $currentPageID,
-                    activeDragItemID: dragState?.item.id,
+                    dragVisualState: dragVisualState,
                     onInternalDragChanged: updateInternalDrag,
                     onInternalDragEnded: finishInternalDrag
                 )
@@ -283,6 +286,35 @@ struct LauncherView: View {
             .min { lhs, rhs in
                 lhs.1.area < rhs.1.area
             }
+    }
+
+    private func dragVisualState(for settings: LauncherSettings) -> LauncherDragVisualState {
+        guard let dragState else {
+            return .inactive
+        }
+
+        guard let target = dragTarget(at: dragState.location), target.item.id != dragState.item.id else {
+            return LauncherDragVisualState(
+                activeItemID: dragState.item.id,
+                mergeTargetItemID: nil,
+                reorderTargetItemID: nil
+            )
+        }
+
+        let localLocation = CGPoint(
+            x: dragState.location.x - target.frame.minX,
+            y: dragState.location.y - target.frame.minY
+        )
+        let isMergeCandidate = dragState.sourceFolderID == nil
+            && dragState.item.isApp
+            && target.item.isApp
+            && isIconDrop(localLocation, settings: settings)
+
+        return LauncherDragVisualState(
+            activeItemID: dragState.item.id,
+            mergeTargetItemID: isMergeCandidate ? target.item.id : nil,
+            reorderTargetItemID: isMergeCandidate ? nil : target.item.id
+        )
     }
 
     private func isIconDrop(_ location: CGPoint, settings: LauncherSettings) -> Bool {
