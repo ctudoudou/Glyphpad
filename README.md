@@ -4,7 +4,7 @@
 
 Apple took Launchpad away. Glyphpad brings it back, the open-source way.
 
-It is a native, fast Launchpad replacement for modern macOS: open it, type a few letters, launch the app, and get back to what you were doing. No web wrapper. No heavy control center. The current local app bundle is only about **3 MB**.
+It is a native, fast Launchpad replacement for modern macOS: open it, type a few letters, launch the app, and get back to what you were doing. Only about **3 MB**.
 
 Glyphpad keeps the classic full-screen grid, search, folders, pages, and drag sorting, then adds the things Launchpad should have had: custom layout, custom background, a global hot key, and a separate settings window. Everything important stays local in SQLite. Future LLM-assisted organization is planned as a helper, not something that takes over your Mac.
 
