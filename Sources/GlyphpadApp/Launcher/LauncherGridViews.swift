@@ -13,11 +13,13 @@ struct LauncherDragVisualState: Equatable {
     let activeItemID: String?
     let mergeTargetItemID: String?
     let reorderTargetItemID: String?
+    let reorderPlacement: LauncherDropPlacement?
 
     static let inactive = LauncherDragVisualState(
         activeItemID: nil,
         mergeTargetItemID: nil,
-        reorderTargetItemID: nil
+        reorderTargetItemID: nil,
+        reorderPlacement: nil
     )
 
     var isMergeCandidate: Bool {
@@ -35,6 +37,10 @@ struct LauncherDragVisualState: Equatable {
             return .reorderTarget
         }
         return .inactive
+    }
+
+    func reorderPlacement(for itemID: String) -> LauncherDropPlacement? {
+        itemID == reorderTargetItemID ? reorderPlacement : nil
     }
 }
 
@@ -172,6 +178,10 @@ struct LauncherItemTile: View {
         dragVisualState.role(for: item.id)
     }
 
+    private var reorderPlacement: LauncherDropPlacement? {
+        dragVisualState.reorderPlacement(for: item.id)
+    }
+
     var body: some View {
         tile
             .contentShape(Rectangle())
@@ -279,12 +289,31 @@ struct LauncherItemTile: View {
                     .offset(x: 8, y: -8)
             }
         case .reorderTarget:
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(.white.opacity(0.30), lineWidth: 1)
-                .frame(width: settings.tileWidth + 12, height: settings.tileHeight + 8)
-                .allowsHitTesting(false)
+            ZStack {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(.white.opacity(0.26), lineWidth: 1)
+                    .frame(width: settings.tileWidth + 12, height: settings.tileHeight + 8)
+
+                Capsule()
+                    .fill(.white.opacity(0.78))
+                    .frame(width: 4, height: settings.clampedIconSize + 26)
+                    .shadow(color: .white.opacity(0.30), radius: 10, x: 0, y: 0)
+                    .offset(x: reorderIndicatorOffsetX)
+            }
+            .allowsHitTesting(false)
         case .active, .inactive:
             EmptyView()
+        }
+    }
+
+    private var reorderIndicatorOffsetX: CGFloat {
+        switch reorderPlacement {
+        case .before:
+            return -(settings.tileWidth / 2) - 4
+        case .after:
+            return (settings.tileWidth / 2) + 4
+        case nil:
+            return 0
         }
     }
 

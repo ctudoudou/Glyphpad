@@ -12,7 +12,7 @@ enum PageNavigationDirection: String {
     case next
 }
 
-enum LauncherDropPlacement {
+enum LauncherDropPlacement: Equatable {
     case before
     case after
 }

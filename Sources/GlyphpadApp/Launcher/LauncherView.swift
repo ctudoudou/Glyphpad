@@ -157,6 +157,7 @@ struct LauncherView: View {
             EmptySearchView()
                 .frame(width: maxGridWidth, height: maxGridHeight)
         } else {
+            let displayItems = visuallyOrderedItems(filteredItems, visualState: dragVisualState)
             switch settings.navigationMode {
             case .verticalScroll:
                 ScrollView(.vertical, showsIndicators: false) {
@@ -168,7 +169,7 @@ struct LauncherView: View {
                             }
 
                         LazyVGrid(columns: gridColumns(for: settings), spacing: settings.verticalSpacing) {
-                            ForEach(filteredItems) { item in
+                            ForEach(displayItems) { item in
                                 LauncherItemTile(
                                     item: item,
                                     settings: settings,
@@ -185,13 +186,17 @@ struct LauncherView: View {
                             }
                         }
                         .padding(.vertical, 6)
+                        .animation(
+                            .spring(response: 0.24, dampingFraction: 0.78),
+                            value: displayItems.map(\.id)
+                        )
                     }
                 }
                 .frame(width: maxGridWidth, height: maxGridHeight)
                 .clipped()
             case .horizontalPages:
                 PagedLauncherGrid(
-                    items: filteredItems,
+                    items: displayItems,
                     settings: settings,
                     maxGridWidth: maxGridWidth,
                     maxGridHeight: maxGridHeight,
@@ -288,6 +293,35 @@ struct LauncherView: View {
             }
     }
 
+    private func visuallyOrderedItems(
+        _ items: [LauncherItem],
+        visualState: LauncherDragVisualState
+    ) -> [LauncherItem] {
+        guard let activeItemID = visualState.activeItemID,
+              let reorderTargetItemID = visualState.reorderTargetItemID,
+              let placement = visualState.reorderPlacement,
+              let sourceIndex = items.firstIndex(where: { $0.id == activeItemID }) else {
+            return items
+        }
+
+        var orderedItems = items
+        let activeItem = orderedItems.remove(at: sourceIndex)
+        guard let targetIndex = orderedItems.firstIndex(where: { $0.id == reorderTargetItemID }) else {
+            return items
+        }
+
+        let insertIndex: Int
+        switch placement {
+        case .before:
+            insertIndex = targetIndex
+        case .after:
+            insertIndex = targetIndex + 1
+        }
+
+        orderedItems.insert(activeItem, at: min(max(insertIndex, 0), orderedItems.count))
+        return orderedItems
+    }
+
     private func dragVisualState(for settings: LauncherSettings) -> LauncherDragVisualState {
         guard let dragState else {
             return .inactive
@@ -297,7 +331,8 @@ struct LauncherView: View {
             return LauncherDragVisualState(
                 activeItemID: dragState.item.id,
                 mergeTargetItemID: nil,
-                reorderTargetItemID: nil
+                reorderTargetItemID: nil,
+                reorderPlacement: nil
             )
         }
 
@@ -309,11 +344,13 @@ struct LauncherView: View {
             && dragState.item.isApp
             && target.item.isApp
             && isIconDrop(localLocation, settings: settings)
+        let placement: LauncherDropPlacement = localLocation.x >= target.frame.width / 2 ? .after : .before
 
         return LauncherDragVisualState(
             activeItemID: dragState.item.id,
             mergeTargetItemID: isMergeCandidate ? target.item.id : nil,
-            reorderTargetItemID: isMergeCandidate ? nil : target.item.id
+            reorderTargetItemID: isMergeCandidate ? nil : target.item.id,
+            reorderPlacement: isMergeCandidate ? nil : placement
         )
     }
 
