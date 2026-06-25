@@ -19,3 +19,7 @@ The README describes the local app bundle as about 3 MB because the current gene
 ## Product Voice
 
 The top-level README copy should sell Glyphpad as a small, native, familiar Launchpad replacement. Build instructions and technical notes remain precise, but the intro, value proposition, feature list, and usage flow use a more conversational tone.
+
+## Launchpad Restoration Framing
+
+The README leads with Apple removing Launchpad and Glyphpad bringing the experience back in an open, native, fast, roughly 3 MB package. This matches the product story while keeping implementation claims grounded in the current app.

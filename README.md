@@ -2,11 +2,11 @@
 
 [中文说明](README.zh-CN.md)
 
-Glyphpad is the Launchpad replacement I wanted on macOS: open it, type a few letters, launch the app, and get out of the way.
+Apple took Launchpad away. Glyphpad brings it back, the open-source way.
 
-It feels familiar on purpose. Full-screen grid, search, folders, pages, drag sorting, keyboard shortcuts, custom background, and a separate settings window. No web wrapper. No bloated control center. The current local app bundle is only about **3 MB**.
+It is a native, fast Launchpad replacement for modern macOS: open it, type a few letters, launch the app, and get back to what you were doing. No web wrapper. No heavy control center. The current local app bundle is only about **3 MB**.
 
-Everything important stays local in SQLite, including your app list, layout, folders, settings, and future classification history. LLM-assisted organization is planned as a helper, not something that takes over your Mac.
+Glyphpad keeps the classic full-screen grid, search, folders, pages, and drag sorting, then adds the things Launchpad should have had: custom layout, custom background, a global hot key, and a separate settings window. Everything important stays local in SQLite. Future LLM-assisted organization is planned as a helper, not something that takes over your Mac.
 
 ## Screenshot
 
@@ -14,16 +14,16 @@ Everything important stays local in SQLite, including your app list, layout, fol
 
 ## Why Glyphpad
 
-- **Only about 3 MB**: small enough to feel like a utility, not a platform.
-- **Feels like Launchpad**: full-screen app grid, soft blurred background, search, folders, pages, and page dots.
-- **Fast to use**: open it and start typing. The search field is already focused.
-- **Your layout stays yours**: drag apps around, create folders, move apps in and out, and Glyphpad remembers the order.
-- **Folders clean themselves up**: empty folders disappear automatically.
-- **Use it your way**: vertical scrolling for a long app list, or horizontal pages for the classic Launchpad feel.
-- **Make it yours**: choose a background image, tune blur, set rows, columns, icon size, and auto-arrange behavior.
-- **Settings stay separate**: the launcher stays clean; layout, appearance, hot key, and API settings live in their own window.
-- **Keyboard friendly**: use the default global hot key or record your own.
-- **Local-first**: app metadata, folders, layout, settings, and future classification data are stored in SQLite on your Mac.
+- **Launchpad is back**: the same full-screen app grid idea, rebuilt for macOS after Apple removed it.
+- **Only about 3 MB**: small enough to feel like part of the system.
+- **Native and fast**: built as a macOS app, not a web page pretending to be one.
+- **Search first**: open Glyphpad and start typing. The search field is already focused.
+- **Folders and sorting that stick**: drag apps around, create folders, move apps in and out, and your layout is saved.
+- **No folder mess**: empty folders clean themselves up.
+- **Classic or compact**: use horizontal pages for the Launchpad feel, or vertical scrolling for long app lists.
+- **Make it yours**: tune rows, columns, icon size, background image, blur, and auto-arrange behavior.
+- **Global hot key**: summon it instantly, and change the shortcut whenever you want.
+- **Local-first by default**: app metadata, layout, folders, settings, and future classification history stay in SQLite on your Mac.
 - **Ready for smarter organization**: OpenAI-compatible API settings are already in place for future automatic classification workflows.
 
 ## Requirements
