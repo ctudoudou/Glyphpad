@@ -1,5 +1,8 @@
 <div align="center">
-<h1>Glyphpad | 一个原生 macOS Launchpad 替代品</h1>
+<h1>Glyphpad</h1>
+<h4 style="font-weight: bold">一个原生 macOS Launchpad 替代品</h4>
+
+![版本](https://img.shields.io/badge/version-1.0.0-blue)
 
 > Apple 让 Launchpad 消失了, Glyphpad 想用开源的方式把它带回来。
 

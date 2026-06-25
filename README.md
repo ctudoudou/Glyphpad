@@ -1,5 +1,8 @@
 <div align="center">
-<h1>Glyphpad | A Native macOS Launchpad Replacement</h1>
+<h1>Glyphpad</h1>
+<h4 style="font-weight: bold">A Native macOS Launchpad Replacement</h4>
+
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
 
 > Apple made Launchpad disappear. Glyphpad wants to bring it back, the open-source way.
 
