@@ -14,6 +14,7 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
     private let appRepository: SQLiteAppRepository?
     private let folderRepository: SQLiteFolderRepository?
     private let layoutRepository: SQLiteLayoutRepository?
+    private let iconOverrideRepository: SQLiteAppIconOverrideRepository?
     private var refreshTask: Task<Void, Never>?
     private var directoryWatcher: ApplicationDirectoryWatcher?
     private var appIndex: [String: InstalledApplication] = [:]
@@ -25,11 +26,13 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
             self.appRepository = store.appRepository()
             self.folderRepository = store.folderRepository()
             self.layoutRepository = store.layoutRepository()
+            self.iconOverrideRepository = store.appIconOverrideRepository()
         } catch {
             NSLog("Failed to open app cache store: \(error.localizedDescription)")
             self.appRepository = nil
             self.folderRepository = nil
             self.layoutRepository = nil
+            self.iconOverrideRepository = nil
         }
     }
 
@@ -38,6 +41,7 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         let reloadStartedAt = PerformanceLog.start()
 
         loadLayout()
+        loadIconOverrides()
         loadFolders()
         PerformanceLog.measure("library.cache.load", metadata: "reason=\(reason)") {
             loadCachedApps()
@@ -380,6 +384,14 @@ final class ApplicationLibrary: ObservableObject, @unchecked Sendable {
         } catch {
             NSLog("Failed to load launcher layout: \(error.localizedDescription)")
             layoutOrder = []
+        }
+    }
+
+    private func loadIconOverrides() {
+        do {
+            iconCache.updateOverrides(try iconOverrideRepository?.fetchAll() ?? [])
+        } catch {
+            NSLog("Failed to load icon overrides: \(error.localizedDescription)")
         }
     }
 

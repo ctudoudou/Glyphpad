@@ -1,7 +1,7 @@
 import Foundation
 
 public final class GlyphpadStore: @unchecked Sendable {
-    public static let currentSchemaVersion = 4
+    public static let currentSchemaVersion = 5
 
     private let database: SQLiteDatabase
 
@@ -24,6 +24,10 @@ public final class GlyphpadStore: @unchecked Sendable {
 
     public func layoutRepository() -> SQLiteLayoutRepository {
         SQLiteLayoutRepository(database: database)
+    }
+
+    public func appIconOverrideRepository() -> SQLiteAppIconOverrideRepository {
+        SQLiteAppIconOverrideRepository(database: database)
     }
 
     private func migrate() throws {
@@ -106,6 +110,13 @@ public final class GlyphpadStore: @unchecked Sendable {
                 updated_at TEXT NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS app_icon_overrides (
+                app_bundle_identifier TEXT PRIMARY KEY NOT NULL,
+                icon_path TEXT NOT NULL,
+                source_name TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
             INSERT INTO schema_metadata(key, value)
             VALUES ('schema_version', '\(Self.currentSchemaVersion)')
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
@@ -119,5 +130,15 @@ public final class GlyphpadStore: @unchecked Sendable {
         try? database.execute("ALTER TABLE launcher_settings ADD COLUMN api_key TEXT;")
         try? database.execute("ALTER TABLE launcher_settings ADD COLUMN show_hot_key_code INTEGER NOT NULL DEFAULT 49;")
         try? database.execute("ALTER TABLE launcher_settings ADD COLUMN show_hot_key_modifiers INTEGER NOT NULL DEFAULT 2048;")
+        try database.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_icon_overrides (
+                app_bundle_identifier TEXT PRIMARY KEY NOT NULL,
+                icon_path TEXT NOT NULL,
+                source_name TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
     }
 }

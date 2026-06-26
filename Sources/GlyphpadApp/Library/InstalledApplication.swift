@@ -14,7 +14,7 @@ struct InstalledApplication: Identifiable, Equatable {
         self.url = scannedApp.url
         self.displayName = scannedApp.displayName
         self.bundleIdentifier = scannedApp.bundleIdentifier
-        self.icon = iconCache.icon(for: scannedApp.url)
+        self.icon = iconCache.icon(for: scannedApp.url, appID: scannedApp.id)
     }
 
     init?(record: AppRecord, iconCache: IconCache) {
@@ -31,7 +31,7 @@ struct InstalledApplication: Identifiable, Equatable {
         self.url = url
         self.displayName = record.displayName
         self.bundleIdentifier = record.bundleIdentifier
-        self.icon = iconCache.icon(for: url)
+        self.icon = iconCache.icon(for: url, appID: record.bundleIdentifier)
     }
 
     static func == (lhs: InstalledApplication, rhs: InstalledApplication) -> Bool {
@@ -40,12 +40,31 @@ struct InstalledApplication: Identifiable, Equatable {
 }
 
 final class IconCache {
-    private let cache = NSCache<NSURL, NSImage>()
+    private let cache = NSCache<NSString, NSImage>()
+    private var iconOverrides: [String: String] = [:]
 
-    func icon(for url: URL) -> NSImage {
-        let key = url as NSURL
+    func updateOverrides(_ overrides: [AppIconOverrideRecord]) {
+        let nextOverrides = Dictionary(uniqueKeysWithValues: overrides.map { ($0.appBundleIdentifier, $0.iconPath) })
+        guard nextOverrides != iconOverrides else {
+            return
+        }
+
+        iconOverrides = nextOverrides
+        cache.removeAllObjects()
+    }
+
+    func icon(for url: URL, appID: String) -> NSImage {
+        let overridePath = iconOverrides[appID]
+        let key = "\(url.path)|\(overridePath ?? "system")" as NSString
         if let cachedIcon = cache.object(forKey: key) {
             return cachedIcon
+        }
+
+        if let overridePath,
+           let overrideIcon = NSImage(contentsOfFile: overridePath) {
+            overrideIcon.size = NSSize(width: 128, height: 128)
+            cache.setObject(overrideIcon, forKey: key)
+            return overrideIcon
         }
 
         let icon = NSWorkspace.shared.icon(forFile: url.path)

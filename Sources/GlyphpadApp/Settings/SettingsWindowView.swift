@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 
 struct SettingsWindowView: View {
     @ObservedObject var controller: LauncherSettingsController
+    @StateObject private var iconPackController = AppIconPackController()
     @State private var selectedSection: SettingsSection = .layout
     @State private var isRecordingHotKey = false
 
@@ -264,6 +265,30 @@ struct SettingsWindowView: View {
                     step: 1
                 )
             }
+
+            SettingsGroup(title: "Icon Pack", subtitle: "Replace app icons locally without touching the original apps.") {
+                IconPackSummary(controller: iconPackController)
+
+                HStack(spacing: 10) {
+                    Button {
+                        chooseIconPack()
+                    } label: {
+                        Label("Import Icon Pack", systemImage: "square.and.arrow.down")
+                    }
+                    .disabled(iconPackController.isImporting)
+
+                    Button {
+                        iconPackController.clearImportedIcons()
+                    } label: {
+                        Label("Clear Imported Icons", systemImage: "trash")
+                    }
+                    .disabled(iconPackController.overrides.isEmpty)
+                }
+
+                Text("Use PNG, JPG, TIFF, WEBP, or ICNS files. File names should match the app bundle id, app name, or display name, for example com.apple.Safari.png or Safari.icns.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -323,6 +348,37 @@ struct SettingsWindowView: View {
         }
     }
 
+    private func chooseIconPack() {
+        let panel = NSOpenPanel()
+        var allowedTypes: [UTType] = [.folder, .image]
+        if let zipType = UTType(filenameExtension: "zip") {
+            allowedTypes.append(zipType)
+        }
+        panel.allowedContentTypes = allowedTypes
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.title = "Import Icon Pack"
+        panel.message = "Choose a folder or zip file containing app icons."
+        NSApplication.shared.activate(ignoringOtherApps: true)
+
+        let responseHandler: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let url = panel.url else {
+                return
+            }
+            iconPackController.importIconPack(from: url)
+        }
+
+        if let settingsWindow = NSApplication.shared.windows.first(where: { window in
+            window.title == "Glyphpad Settings" && window.isVisible
+        }) {
+            settingsWindow.makeKeyAndOrderFront(nil)
+            panel.beginSheetModal(for: settingsWindow, completionHandler: responseHandler)
+        } else {
+            panel.begin(completionHandler: responseHandler)
+        }
+    }
+
     private var apiStatusText: String {
         if controller.settings.apiEndpoint != nil, controller.settings.apiKey != nil {
             return "Endpoint and key configured"
@@ -369,7 +425,7 @@ enum SettingsSection: CaseIterable, Identifiable {
         case .layout:
             return "Rows, columns, icon size, and paging"
         case .appearance:
-            return "Background image and blur"
+            return "Background and icons"
         case .automation:
             return "Provider settings for classification"
         }
@@ -815,6 +871,72 @@ struct BackgroundPreview: View {
             return nil
         }
         return NSImage(contentsOfFile: path)
+    }
+}
+
+struct IconPackSummary: View {
+    @ObservedObject var controller: AppIconPackController
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.14))
+                    Image(systemName: "app.badge")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 48, height: 48)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(controller.overrides.count) custom icons")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(statusText)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                if controller.isImporting {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            if !controller.overrides.isEmpty {
+                VStack(spacing: 6) {
+                    ForEach(controller.overrides.prefix(5)) { override in
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text(override.appBundleIdentifier)
+                                .font(.system(size: 12, weight: .medium))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer()
+                            Text(override.sourceName)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                .padding(10)
+                .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+    }
+
+    private var statusText: String {
+        guard let result = controller.lastResult else {
+            return controller.overrides.isEmpty
+                ? "No imported icon pack yet."
+                : "Imported icons are stored locally."
+        }
+
+        return "Imported \(result.importedCount) of \(result.scannedImageCount) images from \(result.sourceName)."
     }
 }
 

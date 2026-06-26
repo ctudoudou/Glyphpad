@@ -10,7 +10,7 @@ enum AppStoreFactory {
         return try GlyphpadStore(path: path)
     }
 
-    private static func applicationSupportDirectory(fileManager: FileManager) throws -> URL {
+    static func applicationSupportDirectory(fileManager: FileManager) throws -> URL {
         if let directory = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
             return directory.appendingPathComponent("Glyphpad", isDirectory: true)
         }
