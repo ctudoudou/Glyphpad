@@ -21,15 +21,51 @@ struct LauncherView: View {
             return library.launcherItems
         }
 
-        return library.launcherItems.filter { item in
+        var matchedItems: [LauncherItem] = []
+        var usedItemIDs = Set<String>()
+
+        for item in library.launcherItems {
             switch item {
             case .app(let app):
-                app.displayName.localizedCaseInsensitiveContains(query)
-                    || app.bundleIdentifier?.localizedCaseInsensitiveContains(query) == true
+                if appMatches(app, query: query) {
+                    appendSearchResult(.app(app), to: &matchedItems, usedItemIDs: &usedItemIDs)
+                }
             case .folder(let folder):
-                folder.name.localizedCaseInsensitiveContains(query)
+                if folder.name.localizedCaseInsensitiveContains(query) {
+                    appendSearchResult(.folder(folder), to: &matchedItems, usedItemIDs: &usedItemIDs)
+                }
+
+                for app in library.apps(in: folder) where appMatches(app, query: query) {
+                    appendSearchResult(.app(app), to: &matchedItems, usedItemIDs: &usedItemIDs)
+                }
             }
         }
+
+        return matchedItems
+    }
+
+    private func appMatches(_ app: InstalledApplication, query: String) -> Bool {
+        app.displayName.localizedCaseInsensitiveContains(query)
+            || app.bundleIdentifier?.localizedCaseInsensitiveContains(query) == true
+    }
+
+    private func appendSearchResult(
+        _ item: LauncherItem,
+        to items: inout [LauncherItem],
+        usedItemIDs: inout Set<String>
+    ) {
+        guard usedItemIDs.insert(item.id).inserted else {
+            return
+        }
+        items.append(item)
+    }
+
+    private func allowsInternalDrag(item: LauncherItem, sourceFolderID: UUID?) -> Bool {
+        if sourceFolderID != nil {
+            return true
+        }
+
+        return library.launcherItems.contains { $0.id == item.id }
     }
 
     private func gridColumns(for settings: LauncherSettings) -> [GridItem] {
@@ -222,6 +258,10 @@ struct LauncherView: View {
         location: CGPoint,
         sourceFolderID: UUID?
     ) {
+        guard allowsInternalDrag(item: item, sourceFolderID: sourceFolderID) else {
+            return
+        }
+
         dragState = LauncherInternalDragState(
             item: item,
             settings: settings,
@@ -236,6 +276,10 @@ struct LauncherView: View {
         location: CGPoint,
         sourceFolderID: UUID?
     ) {
+        guard allowsInternalDrag(item: item, sourceFolderID: sourceFolderID) else {
+            return
+        }
+
         defer {
             withAnimation(.easeOut(duration: 0.12)) {
                 dragState = nil
