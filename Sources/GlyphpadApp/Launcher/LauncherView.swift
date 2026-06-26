@@ -89,10 +89,12 @@ struct LauncherView: View {
                 }
 
                 if let dragState {
+                    let visualState = dragVisualState(for: dragState.settings)
                     LauncherDragPreview(
                         item: dragState.item,
                         settings: dragState.settings,
-                        library: library
+                        library: library,
+                        isMergeCandidate: visualState.isMergeCandidate
                     )
                     .position(dragState.location)
                     .allowsHitTesting(false)
@@ -136,6 +138,7 @@ struct LauncherView: View {
     @ViewBuilder
     private func launcherContent(maxSize: CGSize) -> some View {
         let settings = settingsController.settings.fitting(maxSize: maxSize)
+        let dragVisualState = dragVisualState(for: settings)
         let maxGridWidth = min(
             maxSize.width - 96,
             CGFloat(settings.clampedColumns) * settings.tileWidth
@@ -154,6 +157,7 @@ struct LauncherView: View {
             EmptySearchView()
                 .frame(width: maxGridWidth, height: maxGridHeight)
         } else {
+            let displayItems = visuallyOrderedItems(filteredItems, visualState: dragVisualState)
             switch settings.navigationMode {
             case .verticalScroll:
                 ScrollView(.vertical, showsIndicators: false) {
@@ -165,7 +169,7 @@ struct LauncherView: View {
                             }
 
                         LazyVGrid(columns: gridColumns(for: settings), spacing: settings.verticalSpacing) {
-                            ForEach(filteredItems) { item in
+                            ForEach(displayItems) { item in
                                 LauncherItemTile(
                                     item: item,
                                     settings: settings,
@@ -175,20 +179,24 @@ struct LauncherView: View {
                                         library.launch(app)
                                         dismiss()
                                     },
-                                    activeDragItemID: dragState?.item.id,
+                                    dragVisualState: dragVisualState,
                                     onInternalDragChanged: updateInternalDrag,
                                     onInternalDragEnded: finishInternalDrag
                                 )
                             }
                         }
                         .padding(.vertical, 6)
+                        .animation(
+                            .spring(response: 0.24, dampingFraction: 0.78),
+                            value: displayItems.map(\.id)
+                        )
                     }
                 }
                 .frame(width: maxGridWidth, height: maxGridHeight)
                 .clipped()
             case .horizontalPages:
                 PagedLauncherGrid(
-                    items: filteredItems,
+                    items: displayItems,
                     settings: settings,
                     maxGridWidth: maxGridWidth,
                     maxGridHeight: maxGridHeight,
@@ -200,7 +208,7 @@ struct LauncherView: View {
                         dismiss()
                     },
                     currentPageID: $currentPageID,
-                    activeDragItemID: dragState?.item.id,
+                    dragVisualState: dragVisualState,
                     onInternalDragChanged: updateInternalDrag,
                     onInternalDragEnded: finishInternalDrag
                 )
@@ -283,6 +291,67 @@ struct LauncherView: View {
             .min { lhs, rhs in
                 lhs.1.area < rhs.1.area
             }
+    }
+
+    private func visuallyOrderedItems(
+        _ items: [LauncherItem],
+        visualState: LauncherDragVisualState
+    ) -> [LauncherItem] {
+        guard let activeItemID = visualState.activeItemID,
+              let reorderTargetItemID = visualState.reorderTargetItemID,
+              let placement = visualState.reorderPlacement,
+              let sourceIndex = items.firstIndex(where: { $0.id == activeItemID }) else {
+            return items
+        }
+
+        var orderedItems = items
+        let activeItem = orderedItems.remove(at: sourceIndex)
+        guard let targetIndex = orderedItems.firstIndex(where: { $0.id == reorderTargetItemID }) else {
+            return items
+        }
+
+        let insertIndex: Int
+        switch placement {
+        case .before:
+            insertIndex = targetIndex
+        case .after:
+            insertIndex = targetIndex + 1
+        }
+
+        orderedItems.insert(activeItem, at: min(max(insertIndex, 0), orderedItems.count))
+        return orderedItems
+    }
+
+    private func dragVisualState(for settings: LauncherSettings) -> LauncherDragVisualState {
+        guard let dragState else {
+            return .inactive
+        }
+
+        guard let target = dragTarget(at: dragState.location), target.item.id != dragState.item.id else {
+            return LauncherDragVisualState(
+                activeItemID: dragState.item.id,
+                mergeTargetItemID: nil,
+                reorderTargetItemID: nil,
+                reorderPlacement: nil
+            )
+        }
+
+        let localLocation = CGPoint(
+            x: dragState.location.x - target.frame.minX,
+            y: dragState.location.y - target.frame.minY
+        )
+        let isMergeCandidate = dragState.sourceFolderID == nil
+            && dragState.item.isApp
+            && target.item.isApp
+            && isIconDrop(localLocation, settings: settings)
+        let placement: LauncherDropPlacement = localLocation.x >= target.frame.width / 2 ? .after : .before
+
+        return LauncherDragVisualState(
+            activeItemID: dragState.item.id,
+            mergeTargetItemID: isMergeCandidate ? target.item.id : nil,
+            reorderTargetItemID: isMergeCandidate ? nil : target.item.id,
+            reorderPlacement: isMergeCandidate ? nil : placement
+        )
     }
 
     private func isIconDrop(_ location: CGPoint, settings: LauncherSettings) -> Bool {
