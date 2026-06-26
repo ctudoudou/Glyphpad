@@ -22,7 +22,7 @@ This is a native macOS Launchpad replacement that is only about **3 MB**:
 
 4. Then get back to what you were doing.
 
-Glyphpad keeps the classic full-screen grid, search, folders, pages, and drag sorting, then adds the things Launchpad should have had: custom layout, custom background, a global hot key, and a separate settings window. Your important data stays local in SQLite. Future LLM-assisted organization will be a helper, not a tiny robot trying to take over your Mac.
+Glyphpad keeps the classic full-screen grid, search, folders, pages, and drag sorting, then adds the things Launchpad should have had: custom layout, custom background, custom icon packs, a global hot key, and a separate settings window. Your important data stays local in SQLite. Future LLM-assisted organization will be a helper, not a tiny robot trying to take over your Mac.
 
 ## Screenshot
 
@@ -38,7 +38,8 @@ Glyphpad keeps the classic full-screen grid, search, folders, pages, and drag so
 - **No empty-folder graveyard**: empty folders clean themselves up.
 - **Classic or compact**: use horizontal pages for the Launchpad rhythm, or vertical scrolling when you have a lot of apps.
 - **Custom Launchpad background**: use your own image and tune the blur so it feels like your launcher, not a rented screen.
-- **Make it yours**: tune rows, columns, icon size, background image, blur strength, and auto-arrange behavior.
+- **Bring your own icons**: import an icon pack from a folder or zip file, and Glyphpad will match icons to apps locally.
+- **Make it yours**: tune rows, columns, icon size, background image, blur strength, imported icons, and auto-arrange behavior.
 - **Global hot key**: summon it with one shortcut, or change the shortcut to your own.
 - **Local-first by default**: app metadata, layout, folders, settings, and future classification history stay in SQLite on your Mac.
 - **Ready for smarter organization**: OpenAI-compatible API settings are already in place for future automatic classification workflows.
@@ -96,7 +97,7 @@ Basic flow:
 4. Drag apps to reorder them.
 5. Drag one app onto another to create a folder.
 6. Move apps into a folder, or drag them back out to the top level.
-7. Use `Command + ,` to open Settings and tune layout, pages, background, API settings, and the global hot key.
+7. Use `Command + ,` to open Settings and tune layout, pages, background, icon packs, API settings, and the global hot key.
 8. Use `Option + Space` for quick launch.
 
 ## Keyboard Shortcuts
@@ -116,8 +117,28 @@ Glyphpad does not stuff the launcher full of buttons. All configuration lives in
 
 - **Layout**: auto-arrange, columns, rows, icon size, vertical scrolling, and horizontal pages.
 - **Keyboard**: record a custom global hot key and reset it to the default.
-- **Appearance**: choose a background image, clear it, and tune blur strength.
+- **Appearance**: choose a background image, tune blur strength, import icon packs, and clear imported icons.
 - **API**: store an OpenAI-compatible endpoint and API key locally for future classification features.
+
+## Icon Packs
+
+Want Glyphpad to look a little more like your desk and a little less like a default install? Import an icon pack from **Settings -> Appearance -> Icon Pack**.
+
+Supported inputs:
+
+- A folder containing icon files.
+- A `.zip` file containing icon files.
+- Image formats: `icns`, `png`, `jpg`, `jpeg`, `tif`, `tiff`, and `webp`.
+
+Matching is local and simple: name files after the app bundle id, app id, app display name, or `.app` name. For example:
+
+```text
+com.apple.Safari.icns
+Safari.png
+Visual Studio Code.png
+```
+
+Glyphpad copies matched icons into its own Application Support directory, so the imported icons keep working even if you move or delete the original icon pack.
 
 ## Local Data
 
@@ -127,7 +148,7 @@ Runtime data is stored locally in:
 ~/Library/Application Support/Glyphpad/Glyphpad.sqlite
 ```
 
-The SQLite database stores app metadata, folders, folder members, launcher layout order, launcher settings, categories, and classification suggestion tables.
+The SQLite database stores app metadata, folders, folder members, launcher layout order, launcher settings, imported icon overrides, categories, and classification suggestion tables.
 
 ## Development Workflow
 
