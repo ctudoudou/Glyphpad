@@ -370,6 +370,7 @@ struct LauncherDragPreview: View {
 
 struct SearchField: View {
     @Binding var text: String
+    let onSubmit: () -> Void
     @FocusState private var isFocused: Bool
 
     var body: some View {
@@ -383,6 +384,7 @@ struct SearchField: View {
                 .font(.system(size: 20, weight: .medium))
                 .foregroundStyle(.white)
                 .focused($isFocused)
+                .onSubmit(onSubmit)
         }
         .padding(.horizontal, 20)
         .frame(width: 420, height: 46)
@@ -396,6 +398,14 @@ struct SearchField: View {
                 isFocused = true
             }
         }
+    }
+}
+
+extension InstalledApplication {
+    func matchesSearch(_ query: String) -> Bool {
+        displayName.localizedCaseInsensitiveContains(query)
+            || bundleIdentifier?.localizedCaseInsensitiveContains(query) == true
+            || url.deletingPathExtension().lastPathComponent.localizedCaseInsensitiveContains(query)
     }
 }
 

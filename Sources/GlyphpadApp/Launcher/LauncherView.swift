@@ -15,8 +15,12 @@ struct LauncherView: View {
     @State private var dragState: LauncherInternalDragState?
     @State private var suppressFolderOpen = false
 
+    private var searchQuery: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var filteredItems: [LauncherItem] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = searchQuery
         guard !query.isEmpty else {
             return library.launcherItems
         }
@@ -24,10 +28,10 @@ struct LauncherView: View {
         return library.launcherItems.filter { item in
             switch item {
             case .app(let app):
-                app.displayName.localizedCaseInsensitiveContains(query)
-                    || app.bundleIdentifier?.localizedCaseInsensitiveContains(query) == true
+                app.matchesSearch(query)
             case .folder(let folder):
                 folder.name.localizedCaseInsensitiveContains(query)
+                    || library.apps(in: folder).contains { $0.matchesSearch(query) }
             }
         }
     }
@@ -49,7 +53,10 @@ struct LauncherView: View {
                     .opacity(isBackdropPresented ? 1 : 0)
 
                 VStack(spacing: 34) {
-                    SearchField(text: $searchText)
+                    SearchField(
+                        text: $searchText,
+                        onSubmit: activateFirstSearchResult
+                    )
                         .padding(.top, max(42, proxy.safeAreaInsets.top + 28))
 
                     launcherContent(maxSize: proxy.size)
@@ -110,6 +117,9 @@ struct LauncherView: View {
         }
         .ignoresSafeArea()
         .focusable()
+        .onChange(of: searchText) { _, _ in
+            currentPageID = 0
+        }
         .onAppear {
             library.reload()
             DispatchQueue.main.async {
@@ -131,7 +141,11 @@ struct LauncherView: View {
             }
         }
         .onExitCommand {
-            dismiss()
+            if openFolder != nil {
+                closeOpenFolder()
+            } else {
+                dismiss()
+            }
         }
     }
 
@@ -366,6 +380,20 @@ struct LauncherView: View {
 
     private func dismiss() {
         onDismiss()
+    }
+
+    private func activateFirstSearchResult() {
+        guard !searchQuery.isEmpty, let firstItem = filteredItems.first else {
+            return
+        }
+
+        switch firstItem {
+        case .app(let app):
+            library.launch(app)
+            dismiss()
+        case .folder(let folder):
+            openLauncherFolder(folder)
+        }
     }
 
     private func openLauncherFolder(_ folder: FolderRecord) {
